@@ -4,6 +4,14 @@
 #include <string>
 
 int main() {
+    const app::DslAppConfig defaults;
+    assert(defaults.debugTitleIntervalValue == 1.0);
+#if defined(EUI_DEBUG_BUILD)
+    assert(defaults.showDebugOverlayValue);
+#else
+    assert(!defaults.showDebugOverlayValue);
+#endif
+
     std::string title = "Owned title";
     std::string pageId = "owned_page";
     std::string iconPath = "icons/app.png";
@@ -12,10 +20,23 @@ int main() {
     std::string trayTitle = "Owned tray title";
     std::string trayIcon = "icons/tray.png";
     int keyEvents = 0;
+    bool debugOverlayCalled = false;
 
     app::DslAppConfig config = app::DslAppConfig{}
         .title(title)
         .pageId(pageId)
+        .windowSize(1280, 720)
+        .windowPosition(120, 80)
+        .minWindowSize(640, 480)
+        .maxWindowSize(1920, 1080)
+        .resizable(false)
+        .highDpi(false)
+        .decorated(false)
+        .alwaysOnTop(true)
+        .maximized(true)
+        .debugTitleInterval(0.5)
+        .showDebugOverlay(true)
+        .onDebugOverlay([&](eui::Ui&, const eui::Screen&) { debugOverlayCalled = true; })
         .uiScale(1.25f)
         .iconPath(iconPath)
         .fonts(textFont, iconFont)
@@ -24,6 +45,26 @@ int main() {
         .onKeyEvent([&](const eui::KeyEvent&) { ++keyEvents; });
 
     assert(config.uiScaleValue == 1.25f);
+    assert(config.windowWidthValue == 1280);
+    assert(config.windowHeightValue == 720);
+    assert(config.windowXValue == 120);
+    assert(config.windowYValue == 80);
+    assert(config.windowPositionSetValue);
+    assert(config.minWindowWidthValue == 640);
+    assert(config.minWindowHeightValue == 480);
+    assert(config.maxWindowWidthValue == 1920);
+    assert(config.maxWindowHeightValue == 1080);
+    assert(!config.resizableValue);
+    assert(!config.highDpiValue);
+    assert(!config.decoratedValue);
+    assert(config.alwaysOnTopValue);
+    assert(config.maximizedValue);
+    assert(config.debugTitleIntervalValue == 0.5);
+    assert(config.showDebugOverlayValue);
+    assert(static_cast<bool>(config.debugOverlayCompose));
+    eui::Ui debugUi;
+    config.debugOverlayCompose(debugUi, {});
+    assert(debugOverlayCalled);
 #if defined(EUI_DEBUG_BUILD)
     assert(config.showDebugStatsInTitleValue);
 #else
@@ -72,5 +113,16 @@ int main() {
     assert(config.trayIconPathValue == "icons/temporary-tray.png");
     config.uiScale(0.0f);
     assert(config.uiScaleValue == 1.0f);
+    config.centerWindow();
+    assert(!config.windowPositionSetValue);
+    config.debugTitleInterval(0.0);
+    assert(config.debugTitleIntervalValue == 1.0);
+
+    config.minWindowSize(640, 0);
+    config.maxWindowSize(0, 1080);
+    assert(config.minWindowWidthValue == 640);
+    assert(config.minWindowHeightValue == 0);
+    assert(config.maxWindowWidthValue == 0);
+    assert(config.maxWindowHeightValue == 1080);
     return 0;
 }

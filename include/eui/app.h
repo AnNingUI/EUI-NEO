@@ -25,9 +25,23 @@ struct DslWindowRequest {
 
 const char* windowTitle();
 bool showDebugStatsInTitle();
+double debugTitleUpdateInterval();
+bool showDebugOverlay();
 double frameRateLimit();
 int initialWindowWidth();
 int initialWindowHeight();
+int initialWindowX();
+int initialWindowY();
+bool initialWindowPositionSet();
+int minimumWindowWidth();
+int minimumWindowHeight();
+int maximumWindowWidth();
+int maximumWindowHeight();
+bool windowResizable();
+bool windowHighDpi();
+bool windowDecorated();
+bool windowAlwaysOnTop();
+bool windowMaximized();
 float uiScale();
 bool trayEnabled();
 const char* trayTitle();

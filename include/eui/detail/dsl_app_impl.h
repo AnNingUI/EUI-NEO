@@ -171,6 +171,16 @@ bool showDebugStatsInTitle() {
     return dslAppConfig().showDebugStatsInTitleValue;
 }
 
+double debugTitleUpdateInterval() {
+    const double interval = dslAppConfig().debugTitleIntervalValue;
+    return std::isfinite(interval) && interval > 0.0 ? interval : 1.0;
+}
+
+bool showDebugOverlay() {
+    return dslAppConfig().showDebugOverlayValue &&
+           static_cast<bool>(dslAppConfig().debugOverlayCompose);
+}
+
 double frameRateLimit() {
     return dslAppConfig().fpsValue;
 }
@@ -181,6 +191,54 @@ int initialWindowWidth() {
 
 int initialWindowHeight() {
     return dslAppConfig().windowHeightValue;
+}
+
+int initialWindowX() {
+    return dslAppConfig().windowXValue;
+}
+
+int initialWindowY() {
+    return dslAppConfig().windowYValue;
+}
+
+bool initialWindowPositionSet() {
+    return dslAppConfig().windowPositionSetValue;
+}
+
+int minimumWindowWidth() {
+    return dslAppConfig().minWindowWidthValue;
+}
+
+int minimumWindowHeight() {
+    return dslAppConfig().minWindowHeightValue;
+}
+
+int maximumWindowWidth() {
+    return dslAppConfig().maxWindowWidthValue;
+}
+
+int maximumWindowHeight() {
+    return dslAppConfig().maxWindowHeightValue;
+}
+
+bool windowResizable() {
+    return dslAppConfig().resizableValue;
+}
+
+bool windowHighDpi() {
+    return dslAppConfig().highDpiValue;
+}
+
+bool windowDecorated() {
+    return dslAppConfig().decoratedValue;
+}
+
+bool windowAlwaysOnTop() {
+    return dslAppConfig().alwaysOnTopValue;
+}
+
+bool windowMaximized() {
+    return dslAppConfig().maximizedValue;
 }
 
 float uiScale() {
@@ -252,6 +310,10 @@ bool update(core::window::Handle window, float deltaSeconds, int windowWidth, in
     const auto composeFrame = [&] {
         detail::dslRuntime().compose(config.pageIdValue, logicalWidth, logicalHeight, [](core::dsl::Ui& ui, const core::dsl::Screen& screen) {
             compose(ui, screen);
+            const DslAppConfig& config = dslAppConfig();
+            if (showDebugOverlay()) {
+                config.debugOverlayCompose(ui, screen);
+            }
         });
         state.composed = true;
         state.logicalWidth = logicalWidth;

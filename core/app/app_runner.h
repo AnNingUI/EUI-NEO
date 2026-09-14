@@ -198,7 +198,7 @@ struct AppRunner {
             return;
         }
         const double elapsed = now - lastTitleUpdate;
-        if (elapsed < 1.0) {
+        if (elapsed < debugTitleUpdateInterval()) {
             return;
         }
 

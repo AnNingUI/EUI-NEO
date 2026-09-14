@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
+#include <limits>
 #if defined(EUI_WINDOW_BACKEND_SDL2)
 
 #include <SDL.h>
@@ -345,15 +346,43 @@ Handle createWindow(const WindowCreateRequest& request) {
     if (request.resizable) {
         flags |= SDL_WINDOW_RESIZABLE;
     }
+    if (!request.decorated) {
+        flags |= SDL_WINDOW_BORDERLESS;
+    }
+    if (request.alwaysOnTop) {
+        flags |= SDL_WINDOW_ALWAYS_ON_TOP;
+    }
+    if (request.maximized) {
+        flags |= SDL_WINDOW_MAXIMIZED;
+    }
     flags |= request.renderApi == RenderApi::Vulkan ? SDL_WINDOW_VULKAN : SDL_WINDOW_OPENGL;
 
     SDL_Window* window = SDL_CreateWindow(
         request.title != nullptr ? request.title : "",
-        SDL_WINDOWPOS_CENTERED,
-        SDL_WINDOWPOS_CENTERED,
+        request.positionSet ? request.x : SDL_WINDOWPOS_CENTERED,
+        request.positionSet ? request.y : SDL_WINDOWPOS_CENTERED,
         request.width,
         request.height,
         flags);
+    if (window != nullptr) {
+        if (request.minWidth > 0 || request.minHeight > 0) {
+            SDL_SetWindowMinimumSize(window,
+                                     request.minWidth > 0 ? request.minWidth : 1,
+                                     request.minHeight > 0 ? request.minHeight : 1);
+        }
+        if (request.maxWidth > 0 || request.maxHeight > 0) {
+            const int minimumWidth = request.minWidth > 0 ? request.minWidth : 1;
+            const int minimumHeight = request.minHeight > 0 ? request.minHeight : 1;
+            constexpr int unboundedSize = std::numeric_limits<int>::max() / 4;
+            SDL_SetWindowMaximumSize(window,
+                                     request.maxWidth > 0
+                                         ? std::max(minimumWidth, request.maxWidth)
+                                         : unboundedSize,
+                                     request.maxHeight > 0
+                                         ? std::max(minimumHeight, request.maxHeight)
+                                         : unboundedSize);
+        }
+    }
 #if defined(__linux__) && !defined(__ANDROID__) && defined(SDL_VIDEO_DRIVER_X11)
     if (window != nullptr && request.highDpi) {
         const float scale = x11ContentScale(window);
@@ -364,8 +393,8 @@ Handle createWindow(const WindowCreateRequest& request) {
                 static_cast<int>(std::lround(static_cast<float>(request.height) * scale)));
             SDL_SetWindowPosition(
                 window,
-                SDL_WINDOWPOS_CENTERED,
-                SDL_WINDOWPOS_CENTERED);
+                request.positionSet ? request.x : SDL_WINDOWPOS_CENTERED,
+                request.positionSet ? request.y : SDL_WINDOWPOS_CENTERED);
         }
     }
 #endif
@@ -546,13 +575,36 @@ Handle createWindow(const WindowCreateRequest& request) {
         shareContext = static_cast<GLFWwindow*>(request.parent);
     }
     glfwWindowHint(GLFW_RESIZABLE, request.resizable ? GLFW_TRUE : GLFW_FALSE);
+    glfwWindowHint(GLFW_DECORATED, request.decorated ? GLFW_TRUE : GLFW_FALSE);
+    glfwWindowHint(GLFW_FLOATING, request.alwaysOnTop ? GLFW_TRUE : GLFW_FALSE);
+    glfwWindowHint(GLFW_MAXIMIZED, request.maximized ? GLFW_TRUE : GLFW_FALSE);
 
-    return glfwCreateWindow(
+    GLFWwindow* window = glfwCreateWindow(
         request.width,
         request.height,
         request.title != nullptr ? request.title : "",
         nullptr,
         shareContext);
+    if (window == nullptr) {
+        return nullptr;
+    }
+
+    const int minimumWidth = request.minWidth > 0 ? request.minWidth : GLFW_DONT_CARE;
+    const int minimumHeight = request.minHeight > 0 ? request.minHeight : GLFW_DONT_CARE;
+    const int maximumWidth = request.maxWidth > 0
+        ? std::max(request.maxWidth, request.minWidth > 0 ? request.minWidth : 1)
+        : GLFW_DONT_CARE;
+    const int maximumHeight = request.maxHeight > 0
+        ? std::max(request.maxHeight, request.minHeight > 0 ? request.minHeight : 1)
+        : GLFW_DONT_CARE;
+    if (minimumWidth != GLFW_DONT_CARE || minimumHeight != GLFW_DONT_CARE ||
+        maximumWidth != GLFW_DONT_CARE || maximumHeight != GLFW_DONT_CARE) {
+        glfwSetWindowSizeLimits(window, minimumWidth, minimumHeight, maximumWidth, maximumHeight);
+    }
+    if (request.positionSet) {
+        glfwSetWindowPos(window, request.x, request.y);
+    }
+    return window;
 }
 
 void destroyWindow(Handle window) {

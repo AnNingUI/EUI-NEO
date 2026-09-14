@@ -70,6 +70,31 @@ static const DslAppConfig config = DslAppConfig{}
     .textFont("YouSheBiaoTiHei-2.ttf");
 ```
 
+窗口创建参数也可以直接在 `DslAppConfig` 中设置：
+
+```cpp
+static const DslAppConfig config = DslAppConfig{}
+    .windowSize(1280, 800)
+    .windowPosition(120, 80) // 不调用时默认居中
+    .minWindowSize(800, 500)
+    .maxWindowSize(1920, 1200)
+    .resizable(true)
+    .highDpi(true)
+    .decorated(true)
+    .alwaysOnTop(false)
+    .maximized(false)
+    .debugTitleInterval(1.0)
+    .showDebugStatsInTitle(true)
+    .showDebugOverlay(true)
+    .onDebugOverlay([](eui::Ui& ui, const eui::Screen& screen) {
+        components::layoutDebugOverlay(ui, "debug.bounds", screen.width, screen.height, 8.0f, "debug");
+    });
+```
+
+`minWindowSize` 和 `maxWindowSize` 中的 `0` 表示对应方向不限制；窗口尺寸约束由 GLFW/SDL2 后端执行。`centerWindow()` 会清除显式位置并恢复居中。`highDpi` 在 SDL2 中控制 `SDL_WINDOW_ALLOW_HIGHDPI`；GLFW 的 DPI 感知由其初始化阶段按平台设置，是进程级行为，不能安全地按单个窗口关闭。全屏、透明窗口和 VSync 不属于 `DslAppConfig`，它们会改变平台窗口或渲染后端生命周期，应通过专用平台/渲染配置处理。
+
+Debug 配置只控制诊断输出，不参与业务状态。`showDebugStatsInTitle` 控制窗口标题中的 FPS、CPU/GPU 和渲染统计；`debugTitleInterval` 控制标题统计刷新间隔（秒）。`showDebugOverlay` 与 `onDebugOverlay` 用于注入布局边界、性能标记等调试框，回调在每次页面 compose 后执行；未设置回调时不会绘制任何额外内容。Debug 构建默认开启标题统计和覆盖层开关，Release 构建默认关闭。
+
 `DslAppConfig` 的标题、页面 ID、图标和字体路径、托盘文本与图标路径都由配置对象以 `std::string` 持有。setter 可以安全接收局部或临时 `std::string`；调用返回后不会保留调用方字符串的指针。
 
 托盘后台运行默认关闭。需要托盘的页面可以在 `DslAppConfig` 中显式调用 `.tray(true)`，例如串口工具。启用托盘后，关闭或最小化窗口会隐藏到托盘并释放图形资源；托盘 `Show` 会重新显示窗口，`Exit` 才真正退出。
