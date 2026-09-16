@@ -101,6 +101,40 @@ Debug 配置只控制诊断输出，不参与业务状态。`showDebugStatsInTit
 
 不设置 `.textFont(...)` 时使用 `core/render/text.cpp` 里的全局默认文本字体；不设置 `.iconFont(...)` 时使用全局默认图标字体。默认字体优先从可执行文件旁的 `assets/`、工作目录 `assets/`、上级运行目录 `assets/` 查找；找不到内置字体资源时会回退到平台系统字体，避免单 exe 漏带 assets 后普通文本整段不可见。
 
+## 颜色
+
+所有接收 `eui::Color`（即 `core::Color`）的接口均可直接使用 HEX 字符串，原有浮点 RGBA 写法继续可用：
+
+```cpp
+ui.rect("panel").color("#1E293B").border(1.0f, "#38BDF880").build();
+ui.text("label").color("#FFF").text("Hello").build();
+components::button(ui, "save").colors("#2563EB", "#3B82F6", "#1D4ED8").build();
+eui::Color accent = "#38BDF8";
+eui::Color original{0.2f, 0.4f, 0.6f, 1.0f};
+auto rgb = eui::Color::fromHex(0x336699u);
+auto rgba = eui::Color::fromHexRgba(0x33669980u);
+```
+
+支持 `const char*`、`std::string`、`std::string_view`；解析时复制颜色数值，不保留字符串引用。
+
+| 格式 | 示例 | 说明 |
+| --- | --- | --- |
+| `#RGB` | `#369` | 等同 `#336699`，不透明 |
+| `#RGBA` | `#3698` | 等同 `#33669988` |
+| `#RRGGBB` | `#336699` | 不透明 |
+| `#RRGGBBAA` | `#33669980` | alpha 在末尾，`80` 表示 128/255 |
+
+HEX 不区分大小写，必须包含 `#`，不接受额外空白。隐式构造和 `Color::fromHex(string)` 遇到非法字符串时返回透明黑；外部配置建议先校验，失败时保留原值：
+
+```cpp
+eui::Color color = "#38BDF8";
+if (!eui::Color::tryFromHex(userInput, color)) {
+    // 提示颜色格式无效，color 保持不变。
+}
+```
+
+数值 HEX 必须显式使用 `fromHex(0xRRGGBB)` 或 `fromHexRgba(0xRRGGBBAA)`，以避免带前导零的数值产生 alpha 歧义。`Color` 仍由四个 float 组成、支持普通 RGBA 列表初始化；新增构造函数后不再是 aggregate，不支持 C++20 指定成员初始化（如 `{.r = ...}`）。
+
 ## 布局 DSL
 
 容器：

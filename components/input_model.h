@@ -7,6 +7,9 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <cstring>
+#include <iterator>
+#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
@@ -48,6 +51,8 @@ struct InputModel {
         float preferredCursorX = 0.0f;
         float horizontalScroll = 0.0f;
         float verticalScroll = 0.0f;
+        float scrollbarDragOffset = 0.0f;
+        float scrollbarDragScale = 1.0f;
         unsigned long long textRevision = 0;
         unsigned long long compositionRevision = 0;
         core::Rect lastBounds;
@@ -56,12 +61,15 @@ struct InputModel {
         float cachedFontSize = 0.0f;
         float cachedViewportWidth = -1.0f;
         bool cachedMultiline = false;
+        std::string cachedLayoutText;
         core::TextPrimitive::TextMetrics cachedMetrics;
         std::vector<TextLine> cachedLines;
         float cachedTextWidth = 0.0f;
         bool layoutCacheValid = false;
         std::vector<EditSnapshot> undoStack;
         std::vector<EditSnapshot> redoStack;
+        // 预编辑只持有展示状态，不修改文档/撤销历史；提交或取消后立即释放。
+        std::unique_ptr<InputState> preedit;
     };
 
     struct InputLayout {
@@ -553,23 +561,127 @@ struct InputModel {
             return;
         }
 
-        state.cachedTextRevision = state.textRevision;
-        state.cachedFontFamily = fontFamily;
-        state.cachedFontSize = fontSize;
-        state.cachedViewportWidth = viewportWidth;
-        state.cachedMultiline = multiline;
-        state.cachedMetrics = measureMetrics(state.text, fontFamily, fontSize);
+        const bool reuseParagraphs = multiline && state.layoutCacheValid && state.cachedMultiline &&
+            state.cachedFontFamily == fontFamily && std::fabs(state.cachedFontSize - fontSize) < 0.001f &&
+            std::fabs(state.cachedViewportWidth - viewportWidth) < 0.001f;
         if (multiline) {
-            state.cachedLines = measureLines(state.text, fontFamily, fontSize, viewportWidth);
+            if (reuseParagraphs) {
+                updateChangedParagraphs(state, fontFamily, fontSize, viewportWidth);
+            } else {
+                state.cachedLines = measureLines(state.text, fontFamily, fontSize, viewportWidth);
+            }
+            // 多行的光标与选择使用行级 metrics，不再重复 shaping 整篇文档。
+            state.cachedMetrics = {};
+            state.cachedLayoutText = state.text;
             state.cachedTextWidth = 0.0f;
             for (const TextLine& line : state.cachedLines) {
                 state.cachedTextWidth = std::max(state.cachedTextWidth, line.metrics.width);
             }
         } else {
+            state.cachedMetrics = measureMetrics(state.text, fontFamily, fontSize);
             state.cachedLines = {{0, static_cast<int>(state.text.size()), false, state.cachedMetrics}};
             state.cachedTextWidth = state.cachedMetrics.width;
+            state.cachedLayoutText.clear();
         }
+        state.cachedTextRevision = state.textRevision;
+        state.cachedFontFamily = fontFamily;
+        state.cachedFontSize = fontSize;
+        state.cachedViewportWidth = viewportWidth;
+        state.cachedMultiline = multiline;
         state.layoutCacheValid = true;
+    }
+
+    static void updateChangedParagraphs(InputState& state, const std::string& fontFamily,
+                                        float fontSize, float viewportWidth) {
+        const auto& oldText = state.cachedLayoutText;
+        const auto& newText = state.text;
+        const size_t common = std::min(oldText.size(), newText.size());
+        size_t prefix = 0;
+        constexpr size_t block = 256;
+        while (common - prefix >= block && std::memcmp(oldText.data() + prefix, newText.data() + prefix, block) == 0) prefix += block;
+        while (prefix < common && oldText[prefix] == newText[prefix]) ++prefix;
+        if (prefix == oldText.size() && prefix == newText.size()) return;
+        size_t suffix = 0;
+        while (common - prefix - suffix >= block &&
+               std::memcmp(oldText.data() + oldText.size() - suffix - block,
+                           newText.data() + newText.size() - suffix - block, block) == 0) suffix += block;
+        while (suffix < common - prefix && oldText[oldText.size() - suffix - 1] == newText[newText.size() - suffix - 1]) ++suffix;
+
+        // 改动范围扩展到硬换行边界，保留 ligature、UTF-8 和软换行的完整 shaping 上下文。
+        const size_t previousBreak = prefix ? newText.rfind('\n', prefix - 1) : std::string::npos;
+        const size_t begin = previousBreak == std::string::npos ? 0 : previousBreak + 1;
+        const size_t nextBreak = oldText.find('\n', oldText.size() - suffix);
+        const size_t oldEnd = nextBreak == std::string::npos ? oldText.size() : nextBreak + 1;
+        const size_t newEnd = newText.size() - (oldText.size() - oldEnd);
+        const bool hasSuffix = oldEnd < oldText.size();
+        auto replacement = measureLines(newText.substr(begin, newEnd - begin), fontFamily, fontSize, viewportWidth);
+        if (hasSuffix) replacement.pop_back(); // 后缀已有该段开头，不保留截断串产生的虚拟空行。
+        for (auto& line : replacement) {
+            line.start += static_cast<int>(begin);
+            line.end += static_cast<int>(begin);
+        }
+        auto& lines = state.cachedLines;
+        const auto lower = [&](size_t offset) {
+            return std::lower_bound(lines.begin(), lines.end(), static_cast<int>(offset),
+                [](const TextLine& line, int index) { return line.start < index; });
+        };
+        const size_t first = static_cast<size_t>(lower(begin) - lines.begin());
+        const size_t last = hasSuffix ? static_cast<size_t>(lower(oldEnd) - lines.begin()) : lines.size();
+        const size_t removed = last - first;
+        // 常见的单字符修改不改变可视行数，不搬动整篇文档的 metrics 容器。
+        if (removed == replacement.size()) {
+            std::move(replacement.begin(), replacement.end(), lines.begin() + first);
+        } else {
+            lines.erase(lines.begin() + first, lines.begin() + last);
+            lines.insert(lines.begin() + first, std::make_move_iterator(replacement.begin()), std::make_move_iterator(replacement.end()));
+        }
+        const int delta = static_cast<int>(newEnd) - static_cast<int>(oldEnd);
+        for (size_t i = first + replacement.size(); i < lines.size(); ++i) {
+            lines[i].start += delta;
+            lines[i].end += delta;
+        }
+    }
+
+    static void transferLayoutCache(InputState& source, InputState& target) {
+        target.cachedLines = std::move(source.cachedLines);
+        target.cachedMetrics = std::move(source.cachedMetrics);
+        target.cachedLayoutText = std::move(source.cachedLayoutText);
+        target.cachedFontFamily = std::move(source.cachedFontFamily);
+        target.cachedFontSize = source.cachedFontSize;
+        target.cachedViewportWidth = source.cachedViewportWidth;
+        target.cachedMultiline = source.cachedMultiline;
+        target.cachedTextWidth = source.cachedTextWidth;
+        target.layoutCacheValid = source.layoutCacheValid;
+        target.cachedTextRevision = target.textRevision - 1;
+        source.layoutCacheValid = false;
+    }
+
+    static InputState& displayState(InputState& state, bool composing) {
+        if (!composing) {
+            if (state.preedit) transferLayoutCache(*state.preedit, state);
+            state.preedit.reset();
+            return state;
+        }
+        if (!state.preedit) {
+            state.preedit = std::make_unique<InputState>();
+            // 预编辑开始复用现有排版，避免首个拼音键再次测量整个长文档。
+            transferLayoutCache(state, *state.preedit);
+        }
+        auto& display = *state.preedit;
+        const auto range = selectionRange(state);
+        std::string text = state.text;
+        text.replace(static_cast<size_t>(range.first), static_cast<size_t>(range.second - range.first), state.compositionText);
+        if (display.text != text) {
+            display.text = std::move(text);
+            ++display.textRevision;
+        }
+        display.cursor = range.first + static_cast<int>(state.compositionText.size());
+        display.selectionStart = range.first;
+        display.selectionEnd = display.cursor;
+        display.followCaret = state.followCaret;
+        display.horizontalScroll = state.horizontalScroll;
+        display.verticalScroll = state.verticalScroll;
+        return display;
     }
 
     static const std::vector<InputLayout::Line>& cachedLines(InputState& state,

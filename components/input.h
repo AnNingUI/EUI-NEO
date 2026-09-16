@@ -2,6 +2,7 @@
 
 #include "components/theme.h"
 #include "components/input_model.h"
+#include "components/scroll.h"
 #include "core/dsl.h"
 #include "eui/signal.h"
 
@@ -56,12 +57,15 @@ public:
     }
     InputBuilder& placeholder(std::string value) { placeholder_ = std::move(value); return *this; }
     InputBuilder& multiline(bool value = true) { multiline_ = value; return *this; }
+    /** @brief 多行输入溢出时显示垂直滚动条，默认关闭；不影响滚轮和光标跟随。 */
+    InputBuilder& scrollbar(bool value = true) { scrollbar_ = value; return *this; }
     InputBuilder& fontSize(float value) { fontSize_ = std::max(1.0f, value); return *this; }
     InputBuilder& fontFamily(std::string value) { fontFamily_ = std::move(value); return *this; }
     InputBuilder& inset(float value) { inset_ = std::max(0.0f, value); return *this; }
     InputBuilder& style(const InputStyle& value) { style_ = value; return *this; }
     InputBuilder& theme(const theme::ThemeColorTokens& tokens) {
         style_ = InputStyle(tokens);
+        scrollStyle_ = ScrollStyle(tokens);
         metrics_ = tokens.metrics;
         return *this;
     }
@@ -88,7 +92,11 @@ public:
         const bool focused = ui_.isFocused(hitId);
         const float inset = inset_ >= 0.0f ? inset_ : metrics_.spacing.content;
         const float fontSize = fontSize_ > 0.0f ? fontSize_ : metrics_.typography.input;
-        const float textWidth = std::max(0.0f, width_ - inset * 2.0f);
+        // 开启时固定预留槽位，避免溢出临界点因滚动条显隐反复改变换行宽度。
+        const float scrollbarWidth = scrollbar_ && multiline_
+            ? std::min(metrics_.control.scrollbar, std::max(0.0f, width_ - inset * 2.0f)) : 0.0f;
+        const float scrollbarGutter = scrollbarWidth > 0.0f ? scrollbarWidth + 4.0f : 0.0f;
+        const float textWidth = std::max(0.0f, width_ - inset * 2.0f - scrollbarGutter);
         const bool allowMultiline = multiline_;
         const std::function<void(const std::string&)> onChange = onChange_;
         const std::function<void()> onEnter = onEnter_;
@@ -96,7 +104,8 @@ public:
         const float textLineHeight = fontSize * 1.2f;
         const float textY = multiline_ ? inset : std::max(0.0f, (height_ - textLineHeight) * 0.5f);
         const float textHeight = multiline_ ? std::max(0.0f, height_ - inset * 2.0f) : textLineHeight;
-        const float width = width_;
+        const float width = width_ - scrollbarGutter;
+        const float controlWidth = width_;
         const std::string fontFamily = fontFamily_;
         InputState& state = ui_.state<InputState>(id_);
         if (state.text != text_) {
@@ -116,37 +125,31 @@ public:
         state.cursor = InputModel::clampUtf8Boundary(state.text, state.cursor);
         state.selectionStart = InputModel::clampUtf8Boundary(state.text, state.selectionStart);
         state.selectionEnd = InputModel::clampUtf8Boundary(state.text, state.selectionEnd);
-        const InputLayout layout = InputLayout::build(state, textWidth, textHeight, width_, inset, textY, textLineHeight, fontFamily_, fontSize, multiline_);
-        const bool empty = state.text.empty();
         const bool hasComposition = focused && !state.compositionText.empty();
+        InputState& display = InputModel::displayState(state, hasComposition);
+        const InputLayout layout = InputLayout::build(display, textWidth, textHeight, width, inset, textY, textLineHeight, fontFamily_, fontSize, multiline_);
+        state.horizontalScroll = display.horizontalScroll;
+        state.verticalScroll = display.verticalScroll;
+        const bool empty = display.text.empty();
         const bool hasSelection = !layout.selectionRects.empty();
-        const std::string textDirtyKey = id_ + ".text|" + std::to_string(state.textRevision) +
+        const std::string textDirtyKey = id_ + ".text|" + std::to_string(state.textRevision) + "|" + std::to_string(display.textRevision) +
             "|" + std::to_string(static_cast<int>(std::lround(state.horizontalScroll * 64.0f))) +
             "|" + std::to_string(static_cast<int>(std::lround(state.verticalScroll * 64.0f))) +
-            (empty ? "|p" : "|v");
-        const std::string compositionDirtyKey = id_ + ".composition|" + std::to_string(state.compositionRevision);
+            (empty ? "|p" : "|v") + (hasComposition ? "|ime" : "");
         const float renderedTextHeight = multiline_ ? layout.contentHeight : textHeight;
-        const float compositionPadding = metrics_.spacing.hairline;
-        const float compositionTextLeft = inset;
-        const float compositionTextRight = std::max(compositionTextLeft, width_ - inset);
-        const float compositionAvailableWidth = std::max(4.0f, compositionTextRight - compositionTextLeft);
-        const float compositionTextWidth = hasComposition
-            ? InputModel::measureMetrics(state.compositionText, fontFamily_, fontSize).width
-            : 0.0f;
-        const float compositionWidth = hasComposition
-            ? std::clamp(std::ceil(compositionTextWidth) + compositionPadding * 2.0f, 2.0f, compositionAvailableWidth)
-            : 0.0f;
-        const float compositionX = hasComposition
-            ? std::clamp(layout.clampedCursorX(), compositionTextLeft, std::max(compositionTextLeft, compositionTextRight - compositionWidth))
-            : layout.clampedCursorX();
-        const float caretX = hasComposition
-            ? std::clamp(compositionX + compositionWidth, inset, std::max(inset, width_ - inset))
-            : layout.clampedCursorX();
+        const float caretX = layout.clampedCursorX();
+        const auto compositionRange = InputModel::selectionRange(state);
+        const int compositionSize = hasComposition ? static_cast<int>(state.compositionText.size()) : 0;
+        const auto documentIndex = [hasComposition, compositionRange, compositionSize](int index) {
+            if (!hasComposition || index <= compositionRange.first) return index;
+            if (index < compositionRange.first + compositionSize) return compositionRange.first;
+            return index - compositionSize + compositionRange.second - compositionRange.first;
+        };
 
         auto root = ui_.stack(id_)
             .size(width_, height_)
             .clip()
-            .dirtyKey(InputModel::makeDirtyKey(state, focused, layout));
+            .dirtyKey(InputModel::makeDirtyKey(state, focused, layout) + (scrollbar_ ? "|bar" : "|no-bar"));
         if (hasX_) {
             root.x(x_);
         }
@@ -162,18 +165,18 @@ public:
                     .shadow(focused ? style_.shadow : core::Shadow{})
                     .transition(transition_)
                     .focusable()
-                    .imeRect(hasComposition ? compositionX : caretX, layout.cursorY, 1.5f, textLineHeight)
-                    .onPress([&state, width, inset, layout](const core::PointerEvent& event, const core::Rect& bounds) {
+                    .imeRect(caretX, layout.cursorY, 1.5f, textLineHeight)
+                    .onPress([&state, controlWidth, inset, layout, documentIndex](const core::PointerEvent& event, const core::Rect& bounds) {
                         state.lastBounds = bounds;
-                        state.cursor = InputModel::clampUtf8Boundary(state.text, layout.cursorFromPointer(event.x, event.y, bounds, width, inset));
+                        state.cursor = InputModel::clampUtf8Boundary(state.text, documentIndex(layout.cursorFromPointer(event.x, event.y, bounds, controlWidth, inset)));
                         state.hasPreferredCursorX = false;
                         InputModel::clearSelection(state);
                         state.dragAnchor = state.cursor;
                         state.selecting = true;
                     })
                     .onFocusChanged(onFocus)
-                    .onDrag([&state, width, inset, fontSize, fontFamily, allowMultiline, textHeight, layout](const core::dsl::DragEvent& event) {
-                        state.cursor = InputModel::clampUtf8Boundary(state.text, layout.cursorFromPointer(event.x, event.y, state.lastBounds, width, inset));
+                    .onDrag([&state, width, controlWidth, inset, fontSize, fontFamily, allowMultiline, textHeight, layout, documentIndex](const core::dsl::DragEvent& event) {
+                        state.cursor = InputModel::clampUtf8Boundary(state.text, documentIndex(layout.cursorFromPointer(event.x, event.y, state.lastBounds, controlWidth, inset)));
                         state.hasPreferredCursorX = false;
                         state.selectionStart = state.dragAnchor;
                         state.selectionEnd = state.cursor;
@@ -226,7 +229,7 @@ public:
                                     width,
                                     inset,
                                     0.0f,
-                                    fontSize,
+                                    fontSize * 1.2f,
                                     fontFamily,
                                     fontSize,
                                     allowMultiline);
@@ -374,15 +377,22 @@ public:
                                 ui_.rect(id_ + ".selection." + std::to_string(index))
                                     .position(selectionRect.x - inset, selectionRect.y - textY)
                                     .size(selectionRect.width, selectionRect.height)
-                                    .color(theme::withAlpha(style_.cursor, 0.24f))
+                                    .color(theme::withAlpha(style_.cursor, hasComposition ? 0.12f : 0.24f))
                                     .radius(multiline_ ? 0.0f : 3.0f)
                                     .build();
+                                if (hasComposition) {
+                                    ui_.rect(id_ + ".composition.underline." + std::to_string(index))
+                                        .position(selectionRect.x - inset, selectionRect.y - textY + textLineHeight - 2.f)
+                                        .size(selectionRect.width, 1.f).color(style_.cursor).build();
+                                }
                             }
                         }
 
                         if (multiline_ && !empty) {
                             const auto& lines = layout.lineList();
-                            for (std::size_t index = 0; index < lines.size(); ++index) {
+                            const auto firstLine = static_cast<std::size_t>(std::max(0.0f, std::floor(state.verticalScroll / textLineHeight)));
+                            const auto endLine = std::min(lines.size(), static_cast<std::size_t>(std::ceil((state.verticalScroll + textHeight) / textLineHeight)) + 1);
+                            for (std::size_t index = firstLine; index < endLine; ++index) {
                                 const auto& line = lines[index];
                                 const float y = static_cast<float>(index) * textLineHeight - state.verticalScroll;
                                 if (y + textLineHeight < 0.0f || y > textHeight) {
@@ -392,7 +402,7 @@ public:
                                     .position(0.0f, y)
                                     .size(layout.visibleTextWidth, textLineHeight)
                                     .dirtyKey(textDirtyKey + "|" + std::to_string(index))
-                                    .text(state.text.substr(static_cast<std::size_t>(line.start),
+                                    .text(display.text.substr(static_cast<std::size_t>(line.start),
                                                             static_cast<std::size_t>(std::max(0, line.end - line.start))))
                                     .fontSize(fontSize)
                                     .fontFamily(fontFamily_)
@@ -407,33 +417,11 @@ public:
                                 .position(-state.horizontalScroll, -state.verticalScroll)
                                 .size(layout.visibleTextWidth, renderedTextHeight)
                                 .dirtyKey(textDirtyKey)
-                                .text(empty ? placeholder_ : state.text)
+                                .text(empty ? placeholder_ : display.text)
                                 .fontSize(fontSize)
                                 .fontFamily(fontFamily_)
                                 .lineHeight(textLineHeight)
                                 .color(empty ? style_.placeholder : style_.text)
-                                .wrap(false)
-                                .verticalAlign(core::VerticalAlign::Top)
-                                .build();
-                        }
-
-                        if (hasComposition) {
-                            ui_.rect(id_ + ".composition.bg")
-                                .position(compositionX - inset, layout.cursorY - textY)
-                                .size(compositionWidth, textLineHeight)
-                                .color(theme::withAlpha(style_.focused, 0.82f))
-                                .radius(2.0f)
-                                .build();
-
-                            ui_.text(id_ + ".composition")
-                                .position(compositionX + compositionPadding - inset, layout.cursorY - textY)
-                                .size(std::max(1.0f, compositionWidth - compositionPadding * 2.0f), textLineHeight)
-                                .dirtyKey(compositionDirtyKey)
-                                .text(state.compositionText)
-                                .fontSize(fontSize)
-                                .fontFamily(fontFamily_)
-                                .lineHeight(textLineHeight)
-                                .color(style_.text)
                                 .wrap(false)
                                 .verticalAlign(core::VerticalAlign::Top)
                                 .build();
@@ -449,6 +437,46 @@ public:
                         }
                     })
                     .build();
+                if (scrollbarWidth > 0.0f && textHeight > 0.0f && layout.maxVerticalScroll > 0.0f) {
+                    const float thumbHeight = std::clamp(textHeight * textHeight / layout.contentHeight,
+                                                        std::min(24.0f, textHeight), textHeight);
+                    const float travel = textHeight - thumbHeight;
+                    const float maximum = layout.maxVerticalScroll;
+                    const float thumbY = travel * state.verticalScroll / maximum;
+                    const float barX = width_ - inset - scrollbarWidth;
+                    const auto wheel = [&state, maximum, fontSize](const core::ScrollEvent& event) {
+                        state.followCaret = false;
+                        state.verticalScroll = std::clamp(state.verticalScroll - static_cast<float>(event.y) *
+                            std::max(12.0f, fontSize * 2.2f), 0.0f, maximum);
+                    };
+                    ui_.rect(id_ + ".scrollbar.track")
+                        .position(barX, textY).size(scrollbarWidth, textHeight)
+                        .color(scrollStyle_.track).radius(scrollStyle_.radius)
+                        .preserveFocusOnPress().onScroll(wheel)
+                        .onPress([&state, maximum, travel, thumbHeight, textHeight](const core::PointerEvent& event, const core::Rect& bounds) {
+                            const float scale = bounds.height / textHeight;
+                            const float y = static_cast<float>(event.y - bounds.y) / std::max(0.001f, scale);
+                            state.followCaret = false;
+                            state.verticalScroll = travel > 0.0f ? std::clamp((y - thumbHeight * 0.5f) / travel, 0.0f, 1.0f) * maximum : 0.0f;
+                        }).build();
+                    ui_.rect(id_ + ".scrollbar.thumb")
+                        .position(barX, textY + thumbY).size(scrollbarWidth, thumbHeight)
+                        .states(scrollStyle_.thumb, scrollStyle_.thumbHover, scrollStyle_.thumbPressed)
+                        .radius(scrollStyle_.radius).cursor(core::CursorShape::Hand)
+                        .preserveFocusOnPress().onScroll(wheel)
+                        .onPress([&state, thumbHeight](const core::PointerEvent&, const core::Rect& bounds) {
+                            state.followCaret = false;
+                            state.scrollbarDragOffset = state.verticalScroll;
+                            state.scrollbarDragScale = std::max(0.001f, bounds.height / thumbHeight);
+                        })
+                        .onDrag([&state, travel, maximum](const core::dsl::DragEvent& event) {
+                            state.followCaret = false;
+                            if (travel > 0.0f) {
+                                state.verticalScroll = std::clamp(state.scrollbarDragOffset +
+                                    static_cast<float>(event.totalY) / state.scrollbarDragScale * maximum / travel, 0.0f, maximum);
+                            }
+                        }).build();
+                }
             })
             .build();
     }
@@ -461,6 +489,7 @@ private:
     core::dsl::Ui& ui_;
     std::string id_;
     InputStyle style_;
+    ScrollStyle scrollStyle_;
     theme::ThemeMetricTokens metrics_;
     core::Transition transition_ = core::Transition::make(0.16f, core::Ease::OutCubic);
     std::function<void(const std::string&)> onChange_;
@@ -469,6 +498,7 @@ private:
     std::string text_;
     std::string placeholder_ = "Hello EUI-NEO 😉";
     bool multiline_ = false;
+    bool scrollbar_ = false;
     float width_ = 260.0f;
     float height_ = 44.0f;
     float x_ = 0.0f;

@@ -1,6 +1,7 @@
 #include "core/dsl_runtime.h"
 #include "core/input/input_state.h"
 #include "core/window/window_backend.h"
+#include "components/input.h"
 
 #if defined(EUI_WINDOW_BACKEND_SDL2)
 #ifndef SDL_MAIN_HANDLED
@@ -153,7 +154,7 @@ int main() {
     core::queueKeyInput(window, {core::InputKey::F2, core::KeyAction::Press, {}});
     runtime.update(window, 1.0f / 60.0f, 1.0f, 1.0f);
 
-    const bool passed = presses == 4 && releases == 4 &&
+    bool passed = presses == 4 && releases == 4 &&
         middleDrags > 0 && rightDrags > 0 && contextMenus == 1 &&
         focusedKeys == 2 && defaultFocusedKeys == 0 && applicationKeys == 1;
     if (!passed) {
@@ -166,6 +167,112 @@ int main() {
                   << " defaultFocusedKeys=" << defaultFocusedKeys
                   << " applicationKeys=" << applicationKeys << "\n";
     }
+
+    // 经由 Runtime 的命中、捕获和焦点分发验证输入框滚动条，而非直接调用回调。
+    std::string document;
+    for (int i = 0; i < 2000; ++i) document += "row " + std::to_string(i) + "\n";
+    core::dsl::Ui* editorUi = nullptr;
+    using InputState = components::input_detail::InputModel::InputState;
+    InputState* editorState = nullptr;
+    const auto composeEditor = [&] {
+        runtime.compose("editor", 200.f, 160.f, [&](core::dsl::Ui& ui, const core::dsl::Screen&) {
+            editorUi = &ui;
+            components::input(ui, "field").position(10.f, 10.f).size(180.f, 140.f)
+                .inset(10.f).fontSize(16.f).multiline().scrollbar().value(document)
+                .onChange([&](const std::string& value) { document = value; }).build();
+            editorState = &ui.state<InputState>("field");
+        });
+    };
+    const auto updateEditor = [&] {
+        runtime.update(window, 1.f / 60.f, 1.f, 1.f);
+        composeEditor();
+    };
+    const auto click = [&](double x, double y) {
+        core::queuePointerButton(window, x, y, core::PointerButton::Left, core::PointerAction::Press, modifiers);
+        core::queuePointerButton(window, x, y, core::PointerButton::Left, core::PointerAction::Release, modifiers);
+        updateEditor();
+    };
+    composeEditor();
+    runtime.update(window, 1.f / 60.f, 1.f, 1.f);
+    click(30, 30);
+    core::KeyModifiers selectModifiers;
+    selectModifiers.control = true;
+    selectModifiers.super = true;
+    core::queueKeyInput(window, {core::InputKey::A, core::KeyAction::Press, selectModifiers});
+    updateEditor();
+    const int selectionStart = editorState->selectionStart;
+    const int selectionEnd = editorState->selectionEnd;
+    auto* track = editorUi->find("field.scrollbar.track");
+    if (!track) {
+        std::cerr << "Overflow editor has no scrollbar\n";
+        passed = false;
+    } else {
+        const auto trackFrame = track->frame;
+        click(trackFrame.x + trackFrame.width * 0.5f, trackFrame.y + 1.f);
+        passed = passed && editorState->verticalScroll == 0.f && editorUi->isFocused("field.hit");
+        const auto thumbFrame = editorUi->find("field.scrollbar.thumb")->frame;
+        const double x = thumbFrame.x + thumbFrame.width * 0.5f;
+        const double y = thumbFrame.y + thumbFrame.height * 0.5f;
+        const double travel = trackFrame.height - thumbFrame.height;
+        core::queuePointerButton(window, x, y, core::PointerButton::Left, core::PointerAction::Press, modifiers);
+        updateEditor();
+        core::queuePointerMotion(window, x, y + travel * 0.25, core::PointerButton::Left, modifiers);
+        updateEditor();
+        const float quarterOffset = editorState->verticalScroll;
+        core::queuePointerMotion(window, x, y + travel * 0.5, core::PointerButton::Left, modifiers);
+        updateEditor();
+        const float halfOffset = editorState->verticalScroll;
+        core::queuePointerButton(window, x, y + travel * 0.5, core::PointerButton::Left, core::PointerAction::Release, modifiers);
+        updateEditor();
+        passed = passed && quarterOffset > 0.f && std::fabs(halfOffset - quarterOffset * 2.f) < 1.f &&
+            std::fabs(editorState->verticalScroll - halfOffset) < 1.f &&
+            editorState->selectionStart == selectionStart && editorState->selectionEnd == selectionEnd &&
+            selectionStart != selectionEnd && editorUi->isFocused("field.hit");
+        // 滑块上的滚轮也应滚动文本；之后输入必须仍送到原输入框。
+        core::queueScrollInput(window, 0, -1);
+        updateEditor();
+        passed = passed && editorState->verticalScroll > halfOffset;
+        core::queueTextInput(window, "X");
+        updateEditor();
+        passed = passed && document == "X" && editorState->followCaret &&
+            editorState->verticalScroll == 0.f && !editorUi->find("field.scrollbar.thumb");
+        if (!passed) std::cerr << "Input scrollbar Runtime drag/focus/selection/wheel/type regression failed\n";
+    }
+
+    document = "prefix suffix";
+    composeEditor();
+    using Model = components::input_detail::InputModel;
+    Model::moveCursorTo(*editorState, 7, false);
+    core::queueTextEditing(window, "中文测试");
+    updateEditor();
+    passed = passed && editorState->preedit && editorState->preedit->text == "prefix 中文测试suffix" &&
+        document == "prefix suffix" && !editorUi->find("field.composition") &&
+        editorUi->find("field.composition.underline.0");
+    if (editorState->preedit) {
+        std::string rendered;
+        for (size_t i = 0; i < editorState->preedit->cachedLines.size(); ++i) {
+            const auto* line = editorUi->find("field.text." + std::to_string(i));
+            if (line) rendered += line->text;
+        }
+        passed = passed && rendered == "prefix 中文测试suffix";
+    }
+    core::queueTextEditing(window, "");
+    updateEditor();
+    passed = passed && !editorState->preedit && document == "prefix suffix";
+    editorState->selectionStart = 7;
+    editorState->selectionEnd = static_cast<int>(document.size());
+    editorState->cursor = editorState->selectionEnd;
+    core::queueTextEditing(window, "替换");
+    updateEditor();
+    passed = passed && editorState->preedit && editorState->preedit->text == "prefix 替换";
+    core::queueTextEditing(window, "");
+    core::queueTextInput(window, "替换");
+    updateEditor();
+    passed = passed && !editorState->preedit && document == "prefix 替换";
+    core::queueKeyInput(window, {core::InputKey::Z, core::KeyAction::Press, selectModifiers});
+    updateEditor();
+    passed = passed && document == "prefix suffix";
+    if (!passed) std::cerr << "Input Runtime preedit inline layout, cancel, replacement or undo failed\n";
 
     runtime.shutdown(false);
     core::releaseInputQueue(window);
