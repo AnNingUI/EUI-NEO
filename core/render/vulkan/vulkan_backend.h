@@ -154,6 +154,7 @@ private:
     bool pickDevice();
     bool createDevice();
     bool recreateSwapchain(const RenderSurface& surface);
+    bool createSwapchainResources();
     void destroySwapchain();
     void destroy();
     void recordClearPass(const core::Color& color);
