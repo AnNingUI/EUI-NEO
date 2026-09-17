@@ -1209,7 +1209,14 @@ public:
     ImageBuilder(Ui& ui, Element* element) : BuilderBase<ImageBuilder>(ui, element) {}
 
     ImageBuilder& source(const std::string& value) {
-        element_->imageSource = value;
+        // 继承的链式 setter 返回 ImageBuilder&，源语义必须由元素类型决定。
+        if (element_->kind == ElementKind::Svg) {
+            element_->svgSource = value;
+            element_->imageSource.clear();
+        } else {
+            element_->imageSource = value;
+            element_->svgSource.clear();
+        }
         element_->imageStream.reset();
         return *this;
     }
@@ -1347,8 +1354,7 @@ public:
     SvgBuilder(Ui& ui, Element* element) : ImageBuilder(ui, element) {}
 
     SvgBuilder& source(std::string value) {
-        element_->svgSource = std::move(value);
-        element_->imageSource.clear();
+        ImageBuilder::source(value);
         return *this;
     }
 
