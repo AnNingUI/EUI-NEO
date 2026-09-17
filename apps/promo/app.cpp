@@ -18,8 +18,7 @@ const DslAppConfig& dslAppConfig() {
         .clearColor({0.968f, 0.968f, 0.958f, 1.0f})
         .windowSize(1440, 810)
         .fps(90.0)
-        // This demo deliberately uses the requested system font. Do not ship
-        // this system path as a product asset.
+        // 使用操作系统字体；发布到其他系统时需配置可用的字体路径。
         .textFont("C:/Windows/Fonts/msyhbd.ttc");
     return config;
 }
@@ -476,10 +475,10 @@ void advantagesScene(eui::Ui& ui, float width, float height, float t, float opac
           opacity * controlsIn, nightAmount > 0.5f ? eui::Color{0.72f, 0.84f, 1.0f, 1.0f} : kBlue, eui::HorizontalAlign::Right);
 }
 
-void dataSceneEnhanced(eui::Ui& ui, float width, float height, float t, float opacity) {
+void dataScene(eui::Ui& ui, float width, float height, float t, float opacity) {
     const auto theme = lightTheme();
     const float inProgress = appear(t, 43.236f, 0.72f);
-    label(ui, "data.v2.title", "One runtime.", width * 0.08f, height * 0.08f, width * 0.84f, 98.0f,
+    label(ui, "data.dashboard.title", "One runtime.", width * 0.08f, height * 0.08f, width * 0.84f, 98.0f,
           std::min(width * 0.10f, 122.0f), opacity, kInk, eui::HorizontalAlign::Left,
           (1.0f - inProgress) * width * 0.12f, (1.0f - inProgress) * -24.0f,
           (1.0f - inProgress) * -150.0f, (1.0f - inProgress) * 0.20f, 900.0f,
@@ -501,22 +500,22 @@ void dataSceneEnhanced(eui::Ui& ui, float width, float height, float t, float op
     for (int i = 0; i < 7; ++i) signalValues.push_back(clamp01(0.48f + 0.25f * std::sin(t * 1.7f + i * 0.82f) + 0.10f * std::sin(t * 3.1f + i * 1.7f)));
     std::vector<float> stateValues;
     for (int i = 0; i < 5; ++i) stateValues.push_back(clamp01(0.42f + 0.28f * std::sin(t * 1.15f + i * 0.9f)));
-    ui.stack("data.v2.line").position(x + drift, y).size(lineW, rowH)
+    ui.stack("data.dashboard.line").position(x + drift, y).size(lineW, rowH)
         .scale(0.985f + beat * 0.015f)
         .translateZ((1.0f - inProgress) * -90.0f).rotateY((1.0f - inProgress) * 0.16f).perspective(900.0f).opacity(opacity).content([&] {
-        components::lineChart(ui, "data.v2.line.chart").size(lineW, rowH).title("Signals · LIVE").values(signalValues)
+        components::lineChart(ui, "data.dashboard.line.chart").size(lineW, rowH).title("Signals · LIVE").values(signalValues)
             .labels({"01", "02", "03", "04", "05", "06", "07"}).theme(theme).transition(transition()).build();
     }).build();
-    ui.stack("data.v2.bar").position(x + lineW + gap - drift * 0.5f, y).size(barW, rowH)
+    ui.stack("data.dashboard.bar").position(x + lineW + gap - drift * 0.5f, y).size(barW, rowH)
         .translateZ((1.0f - inProgress) * -150.0f).rotateY((1.0f - inProgress) * -0.14f).perspective(900.0f).opacity(opacity).content([&] {
-        components::barChart(ui, "data.v2.bar.chart").size(barW, rowH).title("States · 90 FPS").values(stateValues)
+        components::barChart(ui, "data.dashboard.bar.chart").size(barW, rowH).title("States · 90 FPS").values(stateValues)
             .labels({"UI", "State", "Frame", "Render", "Ship"}).colors({kBlue, kPurple, kOrange, kGreen, kInk}).theme(theme).transition(transition()).build();
     }).build();
     const float pieX = x + lineW + barW + gap * 2.0f + drift * 0.35f;
     const std::vector<float> pieValues = {0.34f + 0.08f * std::sin(t * 1.20f), 0.26f + 0.06f * std::sin(t * 1.20f + 1.8f), 0.22f + 0.05f * std::sin(t * 1.20f + 3.2f), 0.18f + 0.04f * std::sin(t * 1.20f + 4.6f)};
-    ui.stack("data.v2.pie").position(pieX, y).size(pieW, rowH)
+    ui.stack("data.dashboard.pie").position(pieX, y).size(pieW, rowH)
         .translateZ((1.0f - inProgress) * -210.0f).rotateY((1.0f - inProgress) * 0.11f).perspective(900.0f).opacity(opacity).content([&] {
-        components::pieChart(ui, "data.v2.pie.chart").size(pieW, rowH).title("Composition · LIVE").values(pieValues)
+        components::pieChart(ui, "data.dashboard.pie.chart").size(pieW, rowH).title("Composition · LIVE").values(pieValues)
             .labels({"UI", "State", "Render", "Ship"}).colors({kBlue, kGreen, kOrange, kPurple}).theme(theme).transition(transition(0.46f)).build();
     }).build();
     const int phase = static_cast<int>(std::floor(std::max(0.0f, t - 43.236f) * 2.0f)) % 4;
@@ -531,13 +530,13 @@ void dataSceneEnhanced(eui::Ui& ui, float width, float height, float t, float op
     const float tableY = y + rowH + 18.0f;
     const float tableW = cardW * 0.72f;
     const float tableH = std::min(height * 0.19f, 154.0f);
-    ui.stack("data.v2.table").position(x, tableY).size(tableW, tableH)
+    ui.stack("data.dashboard.table").position(x, tableY).size(tableW, tableH)
         .translateZ((1.0f - inProgress) * -130.0f).rotateY((1.0f - inProgress) * -0.06f).perspective(900.0f).opacity(opacity).content([&] {
-        components::dataTable(ui, "data.v2.table.widget").size(tableW, tableH).columns({"MODULE", "STATUS", "PERF", "PIPELINE"})
+        components::dataTable(ui, "data.dashboard.table.widget").size(tableW, tableH).columns({"MODULE", "STATUS", "PERF", "PIPELINE"})
             .rows(rows).theme(theme).transition(transition(0.38f)).build();
     }).build();
-    smallPill(ui, "data.v2.state", "state -> target -> transition", x + tableW + 18.0f, tableY + 8.0f, cardW - tableW - 18.0f, kInk, opacity);
-    label(ui, "data.v2.metric", std::to_string(static_cast<int>(62 + 18 * std::sin(t * 1.4f))) + " ms", x + tableW + 18.0f, tableY + 62.0f, cardW - tableW - 18.0f, 48.0f, 30.0f, opacity, kBlue, eui::HorizontalAlign::Left);
+    smallPill(ui, "data.dashboard.state", "state -> target -> transition", x + tableW + 18.0f, tableY + 8.0f, cardW - tableW - 18.0f, kInk, opacity);
+    label(ui, "data.dashboard.metric", std::to_string(static_cast<int>(62 + 18 * std::sin(t * 1.4f))) + " ms", x + tableW + 18.0f, tableY + 62.0f, cardW - tableW - 18.0f, 48.0f, 30.0f, opacity, kBlue, eui::HorizontalAlign::Left);
 }
 
 void platformWindow(eui::Ui& ui, const std::string& id, const std::string& platform,
@@ -601,8 +600,7 @@ void platforms(eui::Ui& ui, float width, float height, float t, float opacity) {
                        x, y, w, opacity * stagger, index == 0 ? kBlue : (index == 1 ? kGreen : kPurple),
                        (1.0f - stagger) * -120.0f, fan);
         const float centerX = source + w * 0.5f;
-        // Connect each pulse to the visual center of its platform window.
-        // Using the card's left edge made the macOS branch appear detached.
+        // 分支线连接窗口的视觉中心，确保脉冲路径与窗口变换保持一致。
         const float targetCenter = target + w * 0.5f;
         const float nodeX = centerX + (targetCenter - centerX) * stagger;
         const float lineY = sourceY + 76.0f;
@@ -823,7 +821,7 @@ void compose(eui::Ui& ui, const eui::Screen& screen) {
         if (codeOpacity > 0.001f) codeScene(ui, screen.width, screen.height, t, codeOpacity);
         if (controlsOpacity > 0.001f) productControls(ui, state, screen.width, screen.height, t, controlsOpacity);
         if (motionOpacity > 0.001f) advantagesScene(ui, screen.width, screen.height, t, motionOpacity);
-        if (dataOpacity > 0.001f) dataSceneEnhanced(ui, screen.width, screen.height, t, dataOpacity);
+        if (dataOpacity > 0.001f) dataScene(ui, screen.width, screen.height, t, dataOpacity);
         if (shaderOpacity > 0.001f) shaderScene(ui, screen.width, screen.height, t, shaderOpacity);
         if (showcaseOpacity > 0.001f) svgWorkshopStory(ui, state, screen.width, screen.height, t, showcaseOpacity);
         if (platformOpacity > 0.001f) platforms(ui, screen.width, screen.height, t, platformOpacity);

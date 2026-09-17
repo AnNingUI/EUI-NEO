@@ -98,7 +98,7 @@ Plain fenced code keeps whitespace:
 
 ## HTML
 
-<div>Inline HTML is preserved as text in this MVP.</div>
+<div>Inline HTML is displayed as text.</div>
 <!-- HTML comment is also passed through MD4C text callbacks. -->
 
 ## Display Math

@@ -29,7 +29,7 @@ bool isSvg(const core::dsl::Element* element, const std::string& expected) {
 int main() {
     core::dsl::Ui ui;
     ui.begin("svg-source");
-    // issue #69 的原始调用顺序：size 返回 ImageBuilder&，source 必须仍设置 SVG。
+    // size 返回 ImageBuilder&，后续 source 调用仍须保留 SVG 来源类型。
     ui.column("root").size(960.f, 640.f).padding(32.f).content([&] {
         ui.svg("inline.heart").size(54.f, 54.f).source(heart)
             .tint({1.f, 0.36f, 0.58f, 1.f}).contain().build();
@@ -81,7 +81,7 @@ int main() {
     const auto* original = ui.find("inline.heart");
     passed = check(original && original->frame.width == 54.f && original->frame.height == 54.f &&
         original->frame.x == 32.f && original->frame.y == 32.f && original->color.g == 0.36f &&
-        original->imageFit == core::ImageFit::Contain, "Issue example layout/tint/fit changed") && passed;
+        original->imageFit == core::ImageFit::Contain, "Chained SVG layout/tint/fit changed") && passed;
     for (const auto& pair : {std::pair{"image.path", "assets/icon.svg"},
                              std::pair{"image.reset", "new.png"},
                              std::pair{"image.remote", "https://example.com/image.png"}}) {
@@ -96,7 +96,7 @@ int main() {
     if (!passed) return 1;
 
     const auto pixels = core::render::image::loadStaticSvg(original->id, original->svgSource, false);
-    if (!check(pixels && pixels->pixels && pixels->byteCount == 512u * 512u * 4u, "Issue SVG failed to rasterize")) return 2;
+    if (!check(pixels && pixels->pixels && pixels->byteCount == 512u * 512u * 4u, "Inline SVG failed to rasterize")) return 2;
     size_t visible = 0;
     for (size_t i = 3; i < pixels->byteCount; i += 4) visible += pixels->pixels.get()[i] > 0;
     if (!check(visible > 10000 && visible < 512u * 512u, "Heart is blank or lacks transparent background")) return 3;

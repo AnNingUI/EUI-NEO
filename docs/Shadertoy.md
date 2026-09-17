@@ -27,7 +27,7 @@ EUI 提供固定的全屏四边形顶点着色器，并围绕 `mainImage()` 生�
 - `float`、`int`、`vec2`、`vec3`、`vec4` 自定义 uniform；
 - 普通 UI 的布局、裁剪、圆角、透明度、变换、命中测试和 dirty rect 语义。
 
-两个渲染后端实现同一份契约，不存在跨后端 fallback，也不会用固定 Shader 冒充用户代码。
+两个渲染后端实现相同的运行时契约，执行应用提供的 Shader，不进行跨后端回退。
 
 ## 最小 Graph
 

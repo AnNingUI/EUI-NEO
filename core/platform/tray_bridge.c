@@ -204,34 +204,11 @@ void eui_tray_shutdown(void) {
 #elif defined(EUI_TRAY_SNI)
 
 /*
- * StatusNotifierItem tray backend.
- *
- * Speaks the freedesktop StatusNotifierItem protocol (org.kde.StatusNotifierItem)
- * plus its companion menu protocol DBusMenu (com.canonical.dbusmenu) directly
- * over GLib's GDBus. No GTK and no libappindicator; the only dependency is
- * glib/gio, which is present on essentially every desktop Linux and in every
- * package manager that ships a GLib at all.
- *
- * Why this backend exists: the vendored tray.h reaches the same wire protocol
- * through libappindicator, whose upstream has been unmaintained for years and
- * whose community-maintained Ayatana fork renamed the pkg-config module
- * (appindicator3-0.1 -> ayatana-appindicator3-0.1). The CMake detection probes
- * only the old name, so on a system with just the Ayatana build the tray
- * silently becomes a stub and no one ever learns why. Speaking the protocol
- * directly:
- *
- *   - needs only glib/gio, dropping the whole GTK3 + appindicator chain;
- *   - covers the same desktops: KDE Plasma implements SNI natively and the
- *     GNOME AppIndicator extension implements the same protocol;
- *   - fails honestly: with no StatusNotifierWatcher on the session bus
- *     eui_tray_init() fails and the app falls back to the old stub behaviour
- *     (no icon, no window, no crash).
- *
- * The DBusMenu server below exposes a static two-item menu (Show / Exit) plus
- * a separator, matching exactly what the other three backends render. Protocol
- * details (unique-name ownership, watcher registration order, layout revision,
- * menu item ids) follow libayatana-appindicator's app-indicator.c and
- * libdbusmenu's server.c / menuitem.c, both verified implementations.
+ * StatusNotifierItem 托盘后端，通过 GLib GDBus 实现 org.kde.StatusNotifierItem
+ * 和 com.canonical.dbusmenu 协议，依赖 glib/gio，无需 GTK 或 libappindicator。
+ * 桌面环境需提供 StatusNotifierWatcher，例如 KDE Plasma 或 GNOME AppIndicator 扩展。
+ * 后端监听 watcher 的出现与消失，并在其可用时注册托盘项。
+ * DBusMenu 提供 Show、分隔线和 Exit，与其他托盘后端的菜单语义一致。
  */
 
 #include <gio/gio.h>
