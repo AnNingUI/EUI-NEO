@@ -75,6 +75,40 @@ void writeYuvConversion(ImagePixelFormat format,
 
 } // namespace
 
+GpuDeviceInfo VulkanRenderBackend::gpuDeviceInfo() const {
+    if (!valid()) return {};
+    return {GpuApi::Vulkan, deviceIdentity_, reinterpret_cast<std::uintptr_t>(instance_),
+        reinterpret_cast<std::uintptr_t>(physicalDevice_), reinterpret_cast<std::uintptr_t>(device_),
+        reinterpret_cast<std::uintptr_t>(graphicsQueue_), graphicsFamily_};
+}
+
+bool VulkanRenderBackend::acceptsGpuImage(const GpuImage& image) {
+    const auto& d = image.descriptor();
+    return valid() && image.valid() && d.device.api == GpuApi::Vulkan &&
+        d.device.identity == deviceIdentity_ && d.device.device == reinterpret_cast<std::uintptr_t>(device_) &&
+        d.device.graphicsQueue == reinterpret_cast<std::uintptr_t>(graphicsQueue_) &&
+        d.device.graphicsQueueFamily == graphicsFamily_;
+}
+
+VulkanRenderBackend::TextureHandle VulkanRenderBackend::createGpuTexture(
+    const std::shared_ptr<const GpuImage>& image) {
+    if (!image || !acceptsGpuImage(*image) || !frameActive_) return nullptr;
+    auto* texture = new TextureResource();
+    texture->externalImage = image;
+    const auto& d = image->descriptor();
+    static_assert(sizeof(texture->view) <= sizeof(d.imageView));
+    std::memcpy(&texture->view, &d.imageView, sizeof(texture->view));
+    texture->width = d.width;
+    texture->height = d.height;
+    texture->channels = 4;
+    texture->layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    if (!ensureTextureSampler(*texture)) {
+        delete texture;
+        return nullptr;
+    }
+    return texture;
+}
+
 VulkanRenderBackend::TextureHandle VulkanRenderBackend::createTexture(const unsigned char* pixels, int width, int height) {
     if (pixels == nullptr || width <= 0 || height <= 0 || !frameActive_) {
         return nullptr;
@@ -718,6 +752,8 @@ bool VulkanRenderBackend::ensureImagePipeline(bool premultipliedAlpha) {
 }
 
 bool VulkanRenderBackend::ensureImageDescriptor(TextureResource& texture) {
+    // 已写入的 descriptor 不应在同一次 command buffer 内重复更新。
+    if (texture.descriptorSet != VK_NULL_HANDLE) return true;
     if (imageDescriptorSetLayout_ == VK_NULL_HANDLE) {
         return false;
     }

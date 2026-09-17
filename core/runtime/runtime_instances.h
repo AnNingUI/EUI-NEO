@@ -103,6 +103,8 @@ struct ImageInstance {
     AnimatedValue<Transform> transform;
     std::string source;
     std::shared_ptr<render::ImageStream> stream;
+    std::shared_ptr<const render::GpuImage> gpuImage;
+    std::uint64_t gpuImageRevision = 0;
     std::string svgSource;
     bool flipVertically = false;
     ImageFit fit = ImageFit::Cover;

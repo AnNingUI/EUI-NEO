@@ -19,6 +19,7 @@ public:
 
     void shutdown(bool releaseCachedImageTextures = false) {
         runtime_.shutdown(releaseCachedImageTextures);
+        request_ = {};
         composed_ = false;
         paintRequested_ = false;
     }

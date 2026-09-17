@@ -62,6 +62,7 @@ OpenGLRenderBackend::~OpenGLRenderBackend() {
         return;
     }
     makeCurrent();
+    collectGpuImages(true);
     releaseRenderCache();
     releasePrimitiveResources();
     releasePolygonResources();
@@ -244,6 +245,7 @@ void OpenGLRenderBackend::makeCurrent() {
 #endif
     flushRoundedRectBatch();
     resetStateCache();
+    collectGpuImages(false);
 }
 
 void OpenGLRenderBackend::beginFrame(const RenderSurface& surface) {

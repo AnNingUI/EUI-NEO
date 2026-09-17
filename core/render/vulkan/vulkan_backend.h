@@ -21,6 +21,9 @@ public:
 
     bool initialize() override;
     bool valid() const override;
+    GpuDeviceInfo gpuDeviceInfo() const override;
+    bool acceptsGpuImage(const GpuImage& image) override;
+    TextureHandle createGpuTexture(const std::shared_ptr<const GpuImage>& image) override;
     void makeCurrent() override;
     void beginFrame(const RenderSurface& surface) override;
     void present() override;
@@ -103,6 +106,7 @@ private:
         int height = 0;
         int channels = 0;
         std::uint64_t generation = 0;
+        std::shared_ptr<const GpuImage> externalImage;
     };
 
     struct VideoTextureResource final : TextureResource {
@@ -283,7 +287,7 @@ private:
     VkCommandPool commandPool_ = VK_NULL_HANDLE;
     std::vector<VkCommandBuffer> commandBuffers_;
     VkSemaphore imageAvailable_ = VK_NULL_HANDLE;
-    VkSemaphore renderFinished_ = VK_NULL_HANDLE;
+    std::vector<VkSemaphore> renderFinishedSemaphores_;
     VkFence inFlight_ = VK_NULL_HANDLE;
     std::uint32_t currentImage_ = 0;
     bool frameActive_ = false;

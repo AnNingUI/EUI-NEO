@@ -6,6 +6,7 @@
 int main() {
     const app::DslAppConfig defaults;
     assert(defaults.debugTitleIntervalValue == 1.0);
+    assert(!defaults.shutdownHandler);
 #if defined(EUI_DEBUG_BUILD)
     assert(defaults.showDebugOverlayValue);
 #else
@@ -21,6 +22,7 @@ int main() {
     std::string trayIcon = "icons/tray.png";
     int keyEvents = 0;
     bool debugOverlayCalled = false;
+    bool shutdownCalled = false;
 
     app::DslAppConfig config = app::DslAppConfig{}
         .title(title)
@@ -42,7 +44,11 @@ int main() {
         .fonts(textFont, iconFont)
         .trayTitle(trayTitle)
         .trayIcon(trayIcon)
-        .onKeyEvent([&](const eui::KeyEvent&) { ++keyEvents; });
+        .onKeyEvent([&](const eui::KeyEvent&) { ++keyEvents; })
+        .onShutdown([&] { shutdownCalled = true; });
+
+    config.shutdownHandler();
+    assert(shutdownCalled);
 
     assert(config.uiScaleValue == 1.25f);
     assert(config.windowWidthValue == 1280);

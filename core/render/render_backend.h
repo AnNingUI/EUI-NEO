@@ -3,6 +3,7 @@
 #include <core/render/shadertoy.h>
 
 #include "core/render/image_stream.h"
+#include "core/render/gpu_image.h"
 #include "core/render/primitive_geometry.h"
 #include "core/render/render_surface.h"
 #include "core/window/window_types.h"
@@ -10,6 +11,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <memory>
 #include <vector>
@@ -180,6 +182,13 @@ public:
 
     virtual ~RenderBackend() = default;
 
+    virtual GpuDeviceInfo gpuDeviceInfo() const { return {}; }
+    virtual bool acceptsGpuImage(const GpuImage& image) { (void)image; return false; }
+    virtual TextureHandle createGpuTexture(const std::shared_ptr<const GpuImage>& image) {
+        (void)image;
+        return nullptr;
+    }
+
     virtual bool initialize() = 0;
     virtual bool valid() const = 0;
     virtual void makeCurrent() = 0;
@@ -328,6 +337,10 @@ public:
                     windowWidth,
                     windowHeight);
     }
+
+protected:
+    inline static std::atomic<std::uint64_t> nextDeviceIdentity_{1};
+    const std::uint64_t deviceIdentity_ = nextDeviceIdentity_.fetch_add(1, std::memory_order_relaxed);
 };
 
 std::unique_ptr<RenderBackend> createRenderBackend(core::window::Handle window, RenderBackend* shareBackend = nullptr);

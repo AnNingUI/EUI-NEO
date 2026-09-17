@@ -341,6 +341,7 @@ bool updateManagedWindow(ManagedWindow& managed, float deltaSeconds, bool update
     const float logicalWidth = static_cast<float>(framebufferWidth) / dpiScale;
     const float logicalHeight = static_cast<float>(framebufferHeight) / dpiScale;
 
+    core::render::ScopedRenderBackend scopedRenderBackend(*managed.renderBackend);
     if (managed.content.update(managed.window, deltaSeconds, logicalWidth, logicalHeight, pointerScale, dpiScale, updateRequested)) {
         managed.state.paintRequested = true;
     }

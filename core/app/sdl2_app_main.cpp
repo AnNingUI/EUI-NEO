@@ -566,6 +566,7 @@ bool updateManagedWindow(ManagedWindow& managed, float deltaSeconds, bool update
     const float logicalWidth = static_cast<float>(drawableWidth) / dpi;
     const float logicalHeight = static_cast<float>(drawableHeight) / dpi;
 
+    core::render::ScopedRenderBackend scopedRenderBackend(*managed.renderBackend);
     managed.content.update(managed.window, deltaSeconds, logicalWidth, logicalHeight, pointer, dpi, updateRequested);
     if (managed.content.paintRequested()) {
         managed.renderBackend->beginFrame({

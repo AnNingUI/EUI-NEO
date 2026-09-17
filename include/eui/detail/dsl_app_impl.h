@@ -363,6 +363,7 @@ void releaseGraphicsResources() {
 
 void shutdown() {
     core::async::shutdown();
+    if (dslAppConfig().shutdownHandler) dslAppConfig().shutdownHandler();
     detail::dslRuntime().shutdown();
     eui::network::shutdown();
 }

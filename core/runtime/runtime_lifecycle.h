@@ -263,7 +263,11 @@ inline void Runtime::shutdown(bool releaseCachedImageTextures) {
     instances_.clear();
     elementStructure_.clear();
     hoverTargetCacheValid_ = false;
+    // 元素与回调也可能持有外部 GPU 资源，不能留到设备销毁后的 Runtime 析构。
+    ui_.begin();
+    ui_.end();
     ui_.clearState();
+    keyEventHandler_ = {};
 }
 
 inline void Runtime::releaseGraphicsResources(bool releaseCachedImageTextures) {

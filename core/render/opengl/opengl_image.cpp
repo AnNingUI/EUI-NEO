@@ -23,6 +23,13 @@ struct ImageTextureResource {
     int height = 0;
 };
 
+struct ExternalTextureResource {
+    GLuint texture = 0;
+    unsigned int kind = 3;
+    GLuint sampler = 0;
+    std::shared_ptr<const GpuImage> image;
+};
+
 struct YuvTextureResource {
     GLuint texture = 0;
     unsigned int kind = 1;
@@ -282,6 +289,61 @@ OpenGLRenderBackend::TextureHandle OpenGLRenderBackend::layerTexture(LayerHandle
     return handle;
 }
 
+GpuDeviceInfo OpenGLRenderBackend::gpuDeviceInfo() const {
+    return valid() ? GpuDeviceInfo{GpuApi::OpenGL, deviceIdentity_} : GpuDeviceInfo{};
+}
+
+bool OpenGLRenderBackend::acceptsGpuImage(const GpuImage& image) {
+    const auto& d = image.descriptor();
+    if (!valid() || !image.valid() || d.device.api != GpuApi::OpenGL ||
+        d.device.identity != deviceIdentity_) return false;
+    makeCurrent();
+    if (!glIsTexture(d.texture)) return false;
+    GLint previous = 0;
+    glGetIntegerv(GL_TEXTURE_BINDING_2D, &previous);
+    glBindTexture(GL_TEXTURE_2D, d.texture);
+    GLint bound = 0;
+    glGetIntegerv(GL_TEXTURE_BINDING_2D, &bound);
+    GLint width = 0, height = 0, format = 0, baseLevel = 0;
+    if (static_cast<GLuint>(bound) == d.texture) {
+        glGetTexParameteriv(GL_TEXTURE_2D, GL_TEXTURE_BASE_LEVEL, &baseLevel);
+        glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_WIDTH, &width);
+        glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_HEIGHT, &height);
+        glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_INTERNAL_FORMAT, &format);
+    }
+    glBindTexture(GL_TEXTURE_2D, static_cast<GLuint>(previous));
+    resetStateCache();
+    return width == d.width && height == d.height && baseLevel == 0 &&
+        (format == GL_RGBA8 || format == GL_RGB8 || format == GL_SRGB8_ALPHA8 || format == GL_SRGB8);
+}
+
+OpenGLRenderBackend::TextureHandle OpenGLRenderBackend::createGpuTexture(
+    const std::shared_ptr<const GpuImage>& image) {
+    if (!image || !acceptsGpuImage(*image)) return nullptr;
+    auto* resource = new ExternalTextureResource{image->descriptor().texture, 3, 0, image};
+    glGenSamplers(1, &resource->sampler);
+    if (!resource->sampler) { delete resource; return nullptr; }
+    glSamplerParameteri(resource->sampler, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glSamplerParameteri(resource->sampler, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glSamplerParameteri(resource->sampler, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glSamplerParameteri(resource->sampler, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    return resource;
+}
+
+void OpenGLRenderBackend::collectGpuImages(bool wait) {
+    if (wait && !retiredGpuImages_.empty()) glFinish();
+    for (auto it = retiredGpuImages_.begin(); it != retiredGpuImages_.end();) {
+        const auto fence = static_cast<GLsync>(it->fence);
+        const GLenum result = wait ? GL_ALREADY_SIGNALED : glClientWaitSync(fence, 0, 0);
+        if (result == GL_ALREADY_SIGNALED || result == GL_CONDITION_SATISFIED) {
+            glDeleteSync(fence);
+            it = retiredGpuImages_.erase(it);
+        } else {
+            ++it;
+        }
+    }
+}
+
 OpenGLRenderBackend::TextureHandle OpenGLRenderBackend::createTexture(const unsigned char* pixels,
                                                                       int width,
                                                                       int height) {
@@ -410,6 +472,23 @@ void OpenGLRenderBackend::destroyTexture(TextureHandle handle) {
     if (header == nullptr) {
         return;
     }
+    if (header->kind == 3) {
+        makeCurrent();
+        auto* resource = static_cast<ExternalTextureResource*>(handle);
+        glDeleteSamplers(1, &resource->sampler);
+        // 借用纹理的所有权归应用；保留生命周期引用至本上下文此前的 GPU 读取完成。
+        GLsync fence = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
+        if (fence) {
+            retiredGpuImages_.push_back({fence, std::move(resource->image)});
+            glFlush();
+        } else {
+            glFinish();
+        }
+        delete resource;
+        collectGpuImages(false);
+        resetStateCache();
+        return;
+    }
     if (header->kind == 1) {
         auto* resource = static_cast<YuvTextureResource*>(handle);
         deleteTexture(resource->texture);
@@ -479,7 +558,13 @@ void OpenGLRenderBackend::drawTexture(TextureHandle handle,
     glBufferSubData(GL_ARRAY_BUFFER, 0, static_cast<GLsizeiptr>(vertexFloatCount * sizeof(float)), vertices);
     activeTextureUnit(0);
     bindTexture2D(texture);
+    GLint previousSampler = 0;
+    if (header->kind == 3) {
+        glGetIntegeri_v(GL_SAMPLER_BINDING, 0, &previousSampler);
+        glBindSampler(0, static_cast<const ExternalTextureResource*>(handle)->sampler);
+    }
     glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(vertexFloatCount / 7));
+    if (header->kind == 3) glBindSampler(0, static_cast<GLuint>(previousSampler));
     invalidateBackdropCapture();
 }
 

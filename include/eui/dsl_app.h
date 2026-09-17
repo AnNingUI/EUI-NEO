@@ -46,6 +46,7 @@ struct DslAppConfig {
     std::string trayTitleValue;
     std::string trayIconPathValue;
     std::function<void(const eui::KeyEvent&)> keyEventHandler;
+    std::function<void()> shutdownHandler;
 
     DslAppConfig& title(std::string value) { titleValue = std::move(value); return *this; }
     DslAppConfig& pageId(std::string value) { pageIdValue = std::move(value); return *this; }
@@ -126,6 +127,11 @@ struct DslAppConfig {
     }
     DslAppConfig& onKeyEvent(std::function<void(const eui::KeyEvent&)> handler) {
         keyEventHandler = std::move(handler);
+        return *this;
+    }
+    /** @brief UI/渲染线程退出回调，在主窗口 GPU 设备销毁前释放应用资源引用。 */
+    DslAppConfig& onShutdown(std::function<void()> handler) {
+        shutdownHandler = std::move(handler);
         return *this;
     }
 };

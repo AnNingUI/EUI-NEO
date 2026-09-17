@@ -2,6 +2,7 @@
 
 #include "core/render/render_types.h"
 #include "core/render/image_stream.h"
+#include "core/render/gpu_image.h"
 
 #include <cstdint>
 #include <memory>
@@ -24,6 +25,7 @@ public:
 
     void setSource(const std::string& source);
     void setStream(const std::shared_ptr<render::ImageStream>& stream);
+    void setGpuImage(const std::shared_ptr<const render::GpuImage>& image, std::uint64_t revision = 0);
     void setSvgSource(const std::string& key, const std::string& svg);
     void setFlipVertically(bool value);
     void setBounds(float x, float y, float width, float height);
