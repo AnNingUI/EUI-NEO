@@ -70,11 +70,74 @@ static const DslAppConfig config = DslAppConfig{}
     .textFont("YouSheBiaoTiHei-2.ttf");
 ```
 
+窗口创建参数也可以直接在 `DslAppConfig` 中设置：
+
+```cpp
+static const DslAppConfig config = DslAppConfig{}
+    .windowSize(1280, 800)
+    .windowPosition(120, 80) // 不调用时默认居中
+    .minWindowSize(800, 500)
+    .maxWindowSize(1920, 1200)
+    .resizable(true)
+    .highDpi(true)
+    .decorated(true)
+    .alwaysOnTop(false)
+    .maximized(false)
+    .debugTitleInterval(1.0)
+    .showDebugStatsInTitle(true)
+    .showDebugOverlay(true)
+    .onDebugOverlay([](eui::Ui& ui, const eui::Screen& screen) {
+        components::layoutDebugOverlay(ui, "debug.bounds", screen.width, screen.height, 8.0f, "debug");
+    });
+```
+
+`minWindowSize` 和 `maxWindowSize` 中的 `0` 表示对应方向不限制；窗口尺寸约束由 GLFW/SDL2 后端执行。`centerWindow()` 会清除显式位置并恢复居中。`highDpi` 在 SDL2 中控制 `SDL_WINDOW_ALLOW_HIGHDPI`；GLFW 的 DPI 感知由其初始化阶段按平台设置，是进程级行为，不能安全地按单个窗口关闭。全屏、透明窗口和 VSync 不属于 `DslAppConfig`，它们会改变平台窗口或渲染后端生命周期，应通过专用平台/渲染配置处理。
+
+Debug 配置只控制诊断输出，不参与业务状态。`showDebugStatsInTitle` 控制窗口标题中的 FPS、CPU/GPU 和渲染统计；`debugTitleInterval` 控制标题统计刷新间隔（秒）。`showDebugOverlay` 与 `onDebugOverlay` 用于注入布局边界、性能标记等调试框，回调在每次页面 compose 后执行；未设置回调时不会绘制任何额外内容。Debug 构建默认开启标题统计和覆盖层开关，Release 构建默认关闭。
+
 `DslAppConfig` 的标题、页面 ID、图标和字体路径、托盘文本与图标路径都由配置对象以 `std::string` 持有。setter 可以安全接收局部或临时 `std::string`；调用返回后不会保留调用方字符串的指针。
+
+`.onShutdown(callback)` 在 UI/渲染线程、主窗口 Runtime 和 GPU 设备销毁前调用，供应用停止自己的
+后台生产者并释放所持有的外部 GPU 图像引用。回调也可能在应用初始化失败的清理路径执行，
+必须容忍资源尚未创建，不应抛异常。参见 [外部 GPU 图像的生命周期](动态纹理.md)。
 
 托盘后台运行默认关闭。需要托盘的页面可以在 `DslAppConfig` 中显式调用 `.tray(true)`，例如串口工具。启用托盘后，关闭或最小化窗口会隐藏到托盘并释放图形资源；托盘 `Show` 会重新显示窗口，`Exit` 才真正退出。
 
 不设置 `.textFont(...)` 时使用 `core/render/text.cpp` 里的全局默认文本字体；不设置 `.iconFont(...)` 时使用全局默认图标字体。默认字体优先从可执行文件旁的 `assets/`、工作目录 `assets/`、上级运行目录 `assets/` 查找；找不到内置字体资源时会回退到平台系统字体，避免单 exe 漏带 assets 后普通文本整段不可见。
+
+## 颜色
+
+所有接收 `eui::Color`（即 `core::Color`）的接口均可直接使用 HEX 字符串，原有浮点 RGBA 写法继续可用：
+
+```cpp
+ui.rect("panel").color("#1E293B").border(1.0f, "#38BDF880").build();
+ui.text("label").color("#FFF").text("Hello").build();
+components::button(ui, "save").colors("#2563EB", "#3B82F6", "#1D4ED8").build();
+eui::Color accent = "#38BDF8";
+eui::Color original{0.2f, 0.4f, 0.6f, 1.0f};
+auto rgb = eui::Color::fromHex(0x336699u);
+auto rgba = eui::Color::fromHexRgba(0x33669980u);
+```
+
+支持 `const char*`、`std::string`、`std::string_view`；解析时复制颜色数值，不保留字符串引用。
+
+| 格式 | 示例 | 说明 |
+| --- | --- | --- |
+| `#RGB` | `#369` | 等同 `#336699`，不透明 |
+| `#RGBA` | `#3698` | 等同 `#33669988` |
+| `#RRGGBB` | `#336699` | 不透明 |
+| `#RRGGBBAA` | `#33669980` | alpha 在末尾，`80` 表示 128/255 |
+
+HEX 不区分大小写，必须包含 `#`，不接受额外空白。隐式构造和 `Color::fromHex(string)` 遇到非法字符串时返回透明黑；外部配置建议先校验，失败时保留原值：
+
+```cpp
+eui::Color color = "#38BDF8";
+if (!eui::Color::tryFromHex(userInput, color)) {
+    // 提示颜色格式无效，color 保持不变。
+}
+```
+
+数值 HEX 必须显式使用 `fromHex(0xRRGGBB)` 或 `fromHexRgba(0xRRGGBBAA)`，以避免带前导零的数值产生 alpha 歧义。`Color` 仍由四个 float 组成、支持普通 RGBA 列表初始化；新增构造函数后不再是 aggregate，不支持 C++20 指定成员初始化（如 `{.r = ...}`）。
 
 ## 布局 DSL
 
@@ -389,7 +452,7 @@ opacity、transform、交互和 dirty rect API。`fill()` 是布局填充，frag
 裁剪后的 Shadertoy 区域内更新，区域内开始的拖动会捕获到释放。
 
 标准 uniform、自定义 uniform、JSON/schema、Vulkan 构建期 helper、feedback 和双后端
-兼容矩阵见 [Shadertoy 底层图元](Shadertoy.md)。Keyboard、Audio、Video、Sound、
+兼容矩阵见 [Shadertoy 底层图元](Shadertoy.md)。Keyboard、Video、Sound、
 Cubemap、Volume、动态纹理、可配置 sampler、每 Pass 格式/分辨率明确不属于当前范围，
 也不是待办扩展。可执行示例
 [`examples/shadertoy.cpp`](../examples/shadertoy.cpp) 展示 inline Demo 与 Blackhole、

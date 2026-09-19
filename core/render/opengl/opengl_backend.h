@@ -19,6 +19,9 @@ public:
 
     bool initialize() override;
     bool valid() const override;
+    GpuDeviceInfo gpuDeviceInfo() const override;
+    bool acceptsGpuImage(const GpuImage& image) override;
+    TextureHandle createGpuTexture(const std::shared_ptr<const GpuImage>& image) override;
 
     void makeCurrent() override;
     void beginFrame(const RenderSurface& surface) override;
@@ -82,6 +85,12 @@ public:
                              std::size_t floatCount) override;
 
 private:
+    void collectGpuImages(bool wait);
+    struct RetiredGpuImage {
+        void* fence = nullptr;
+        std::shared_ptr<const GpuImage> image;
+    };
+    std::vector<RetiredGpuImage> retiredGpuImages_;
     void flushRoundedRectBatch();
     void flushTextBatch();
     void releaseShaderToys();

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.14)
-project(EUI-NEO VERSION 0.5.9)
+project(EUI-NEO VERSION 0.6.0)
 
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
@@ -19,7 +19,7 @@ option(EUI_BUILD_TEST_FIXTURES "Build internal test fixture applications." OFF)
 option(EUI_BUILD_FFMPEG_VIDEO_EXAMPLE "Build the optional FFmpeg video playback example." OFF)
 option(EUI_BUILD_SHARED "Build eui_neo as a shared library instead of a static library." OFF)
 option(EUI_ENABLE_INSTALL "Install EUI-NEO library, headers, and CMake package files." ${EUI_NEO_TOP_LEVEL_DEFAULT})
-option(EUI_ENABLE_MODULES "Build optional EUI-NEO modules when their directories are present." ON)
+option(EUI_ENABLE_MODULES "Build optional EUI-NEO modules when their directories are present." ${EUI_NEO_TOP_LEVEL_DEFAULT})
 option(EUI_VULKAN_LOW_LATENCY_PRESENT "Prefer low-latency Vulkan presentation when available." OFF)
 option(EUI_ENABLE_TRAY "Enable the system tray backend. On Linux, configuration fails when neither glib/gio (SNI) nor GTK3 + libappindicator is available; turn this OFF to build without tray support." ON)
 
@@ -122,13 +122,13 @@ function(eui_apply_compile_options target_name)
     elseif(APPLE)
         target_compile_options(${target_name} PRIVATE
             $<$<AND:$<COMPILE_LANGUAGE:CXX>,$<NOT:$<CONFIG:Debug>>>:-Os>
-            $<$<AND:$<COMPILE_LANGUAGE:CXX>,$<NOT:$<CONFIG:Debug>>>:-fno-exceptions>
+            $<$<AND:$<COMPILE_LANGUAGE:CXX>,$<NOT:$<CONFIG:Debug>>,$<NOT:$<STREQUAL:${target_name},vcd_viewer>>,$<NOT:$<STREQUAL:${target_name},gpu_image_probe>>>:-fno-exceptions>
             $<$<AND:$<COMPILE_LANGUAGE:CXX>,$<NOT:$<CONFIG:Debug>>>:-fno-rtti>
         )
     else()
         target_compile_options(${target_name} PRIVATE
             $<$<AND:$<COMPILE_LANGUAGE:CXX>,$<NOT:$<CONFIG:Debug>>>:-Os>
-            $<$<AND:$<COMPILE_LANGUAGE:CXX>,$<NOT:$<CONFIG:Debug>>>:-fno-exceptions>
+            $<$<AND:$<COMPILE_LANGUAGE:CXX>,$<NOT:$<CONFIG:Debug>>,$<NOT:$<STREQUAL:${target_name},vcd_viewer>>,$<NOT:$<STREQUAL:${target_name},gpu_image_probe>>>:-fno-exceptions>
             $<$<AND:$<COMPILE_LANGUAGE:CXX>,$<NOT:$<CONFIG:Debug>>>:-fno-rtti>
         )
     endif()
@@ -234,6 +234,8 @@ set(CORE_SOURCES
     core/window/window_input_backend.cpp
 )
 
+list(APPEND CORE_SOURCES core/audio/audio.cpp)
+
 if(EUI_RESOLVED_RENDER_BACKEND STREQUAL "opengl")
     list(APPEND CORE_SOURCES
         core/render/opengl/opengl_backend.cpp
@@ -269,9 +271,23 @@ target_include_directories(eui_neo
         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/eui-neo>
 )
 target_include_directories(eui_neo PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/3rd/yyjson-0.12.0/src")
+target_include_directories(eui_neo PRIVATE "${EUI_MINIAUDIO_DIR}")
+if(UNIX AND NOT APPLE)
+    target_link_libraries(eui_neo PUBLIC ${CMAKE_DL_LIBS} m)
+elseif(APPLE)
+    target_link_libraries(eui_neo PUBLIC
+        "-framework CoreAudio"
+        "-framework AudioToolbox"
+        "-framework CoreFoundation")
+endif()
 target_link_libraries(eui_neo PUBLIC Threads::Threads)
 target_compile_features(eui_neo PUBLIC cxx_std_17)
 target_compile_definitions(eui_neo PRIVATE YYJSON_DISABLE_WRITER=1)
+# Keep application-facing debug defaults tied to CMake's configuration rather
+# than compiler-specific NDEBUG flags.  FetchContent consumers inherit this
+# definition through eui::neo when their target links the framework.
+target_compile_definitions(eui_neo INTERFACE
+    $<$<CONFIG:Debug>:EUI_DEBUG_BUILD=1>)
 eui_apply_compile_options(eui_neo)
 
 if(EUI_RESOLVED_RENDER_BACKEND STREQUAL "vulkan")
@@ -348,17 +364,14 @@ elseif(APPLE)
     target_compile_definitions(eui_neo PUBLIC EUI_TRAY_APPKIT=1)
     target_link_libraries(eui_neo PUBLIC "-framework Cocoa" objc)
 elseif(UNIX AND EUI_ENABLE_TRAY AND EUI_GIO_FOUND)
-    # StatusNotifierItem backend: speaks the freedesktop SNI + DBusMenu
-    # protocols over GDBus, needing only glib/gio (see tray_bridge.c). This is
-    # the default because glib is ubiquitous and libappindicator is dead.
+    # StatusNotifierItem 通过 GDBus 实现 SNI 和 DBusMenu，仅依赖 glib/gio。
     target_compile_definitions(eui_neo PUBLIC EUI_TRAY_SNI=1)
     target_include_directories(eui_neo PUBLIC ${EUI_GIO_INCLUDE_DIRS})
     target_compile_options(eui_neo PRIVATE ${EUI_GIO_CFLAGS_OTHER})
     target_link_directories(eui_neo PUBLIC ${EUI_GIO_LIBRARY_DIRS})
     target_link_libraries(eui_neo PUBLIC ${EUI_GIO_LIBRARIES})
 elseif(UNIX AND EUI_ENABLE_TRAY AND EUI_APPINDICATOR_FOUND AND EUI_GTK3_FOUND)
-    # Legacy fallback: GTK3 + libappindicator. Only reached when glib/gio is
-    # absent but the old stack is present.
+    # 未找到 glib/gio 时，使用可用的 GTK3 和 libappindicator 后端。
     target_compile_definitions(eui_neo PUBLIC EUI_TRAY_APPINDICATOR=1)
     target_include_directories(eui_neo PUBLIC ${EUI_APPINDICATOR_INCLUDE_DIRS} ${EUI_GTK3_INCLUDE_DIRS})
     target_compile_options(eui_neo PRIVATE ${EUI_APPINDICATOR_CFLAGS_OTHER} ${EUI_GTK3_CFLAGS_OTHER})
@@ -510,10 +523,23 @@ function(eui_neo_configure_named_app target_name)
                 SOURCE "assets/shaders/shadertoy/demo.frag"
                 OUTPUT "${gallery_shadertoy_spirv}")
         endif()
+    elseif(target_name STREQUAL "promo")
+        set(promo_shadertoy_spirv
+            "${EUI_APP_RUNTIME_DIR}/${EUI_SHADERTOY_RUNTIME_ASSET_DIR}/promo_demo.frag.spv")
+        target_compile_definitions(${target_name} PRIVATE
+            EUI_SHADERTOY_DEMO_SOURCE="${EUI_SHADERTOY_RUNTIME_ASSET_DIR}/demo.frag"
+            EUI_SHADERTOY_DEMO_SPIRV="${EUI_SHADERTOY_RUNTIME_ASSET_DIR}/promo_demo.frag.spv")
+        if(EUI_RESOLVED_RENDER_BACKEND STREQUAL "vulkan")
+            eui_compile_shadertoy(${target_name}
+                SOURCE "assets/shaders/shadertoy/demo.frag"
+                OUTPUT "${promo_shadertoy_spirv}")
+        endif()
     elseif(target_name STREQUAL "keyboard")
         target_link_libraries(${target_name} PRIVATE eui::module_keyboard)
     elseif(target_name STREQUAL "serial_tool")
         target_link_libraries(${target_name} PRIVATE eui::module_serial)
+    elseif(target_name STREQUAL "vcd_viewer")
+        target_link_libraries(${target_name} PRIVATE ZLIB::ZLIB)
     endif()
 endfunction()
 
@@ -624,6 +650,9 @@ if(EUI_BUILD_TEST_FIXTURES)
         target_compile_definitions(${probe_name} PRIVATE EUI_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
         add_test(NAME ${probe_name} COMMAND ${probe_name} --frames 3)
         set_tests_properties(${probe_name} PROPERTIES LABELS "probe")
+        if(probe_name STREQUAL "gpu_image_probe")
+            set_tests_properties(${probe_name} PROPERTIES FAIL_REGULAR_EXPRESSION "Validation Error;VUID-")
+        endif()
     endforeach()
 
     if(EUI_RESOLVED_RENDER_BACKEND STREQUAL "vulkan" AND TARGET shadertoy_probe)
@@ -785,6 +814,7 @@ if(EUI_ENABLE_INSTALL)
         3rd/stb_image.h
         3rd/nanosvg.h
         3rd/nanosvgrast.h
+        "${EUI_MINIAUDIO_DIR}/miniaudio.h"
         DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/eui-neo/3rd
     )
     install(FILES "${TRAY_INCLUDE_DIR}/tray.h"

@@ -301,7 +301,9 @@ void VulkanRenderBackend::beginFrame(const RenderSurface& surface) {
     if (swapchain_ == VK_NULL_HANDLE ||
         swapchainExtent_.width != static_cast<std::uint32_t>(surface.framebufferWidth) ||
         swapchainExtent_.height != static_cast<std::uint32_t>(surface.framebufferHeight)) {
-        recreateSwapchain(surface);
+        if (!recreateSwapchain(surface)) {
+            return;
+        }
     }
     if (swapchain_ == VK_NULL_HANDLE || commandBuffers_.empty()) {
         return;
@@ -370,7 +372,7 @@ void VulkanRenderBackend::present() {
     submitInfo.commandBufferCount = 1;
     submitInfo.pCommandBuffers = &commandBuffers_[currentImage_];
     submitInfo.signalSemaphoreCount = 1;
-    submitInfo.pSignalSemaphores = &renderFinished_;
+    submitInfo.pSignalSemaphores = &renderFinishedSemaphores_[currentImage_];
     vkResetFences(device_, 1, &inFlight_);
     if (vkQueueSubmit(graphicsQueue_, 1, &submitInfo, inFlight_) != VK_SUCCESS) {
         vkDestroyFence(device_, inFlight_, nullptr);
@@ -387,7 +389,7 @@ void VulkanRenderBackend::present() {
     VkPresentInfoKHR presentInfo{};
     presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
     presentInfo.waitSemaphoreCount = 1;
-    presentInfo.pWaitSemaphores = &renderFinished_;
+    presentInfo.pWaitSemaphores = &renderFinishedSemaphores_[currentImage_];
     presentInfo.swapchainCount = 1;
     presentInfo.pSwapchains = &swapchain_;
     presentInfo.pImageIndices = &currentImage_;
@@ -606,11 +608,14 @@ bool VulkanRenderBackend::createDevice() {
 }
 
 bool VulkanRenderBackend::recreateSwapchain(const RenderSurface& surface) {
-    vkDeviceWaitIdle(device_);
-    destroySwapchain();
+    if (vkDeviceWaitIdle(device_) != VK_SUCCESS) {
+        return false;
+    }
 
     VkSurfaceCapabilitiesKHR capabilities{};
-    vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physicalDevice_, surface_, &capabilities);
+    if (vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physicalDevice_, surface_, &capabilities) != VK_SUCCESS) {
+        return false;
+    }
 
     std::uint32_t formatCount = 0;
     vkGetPhysicalDeviceSurfaceFormatsKHR(physicalDevice_, surface_, &formatCount, nullptr);
@@ -639,6 +644,9 @@ bool VulkanRenderBackend::recreateSwapchain(const RenderSurface& surface) {
                                    capabilities.minImageExtent.height,
                                    capabilities.maxImageExtent.height);
     }
+    if (extent.width == 0 || extent.height == 0) {
+        return false;
+    }
 
     std::uint32_t imageCount = capabilities.minImageCount + 1;
     if (capabilities.maxImageCount > 0) {
@@ -653,13 +661,11 @@ bool VulkanRenderBackend::recreateSwapchain(const RenderSurface& surface) {
     swapchainInfo.imageColorSpace = surfaceFormat.colorSpace;
     swapchainInfo.imageExtent = extent;
     swapchainInfo.imageArrayLayers = 1;
-    swapchainTransferSrcSupported_ = (capabilities.supportedUsageFlags & VK_IMAGE_USAGE_TRANSFER_SRC_BIT) != 0;
-    swapchainTransferDstSupported_ = (capabilities.supportedUsageFlags & VK_IMAGE_USAGE_TRANSFER_DST_BIT) != 0;
     swapchainInfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
-    if (swapchainTransferSrcSupported_) {
+    if (capabilities.supportedUsageFlags & VK_IMAGE_USAGE_TRANSFER_SRC_BIT) {
         swapchainInfo.imageUsage |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
     }
-    if (swapchainTransferDstSupported_) {
+    if (capabilities.supportedUsageFlags & VK_IMAGE_USAGE_TRANSFER_DST_BIT) {
         swapchainInfo.imageUsage |= VK_IMAGE_USAGE_TRANSFER_DST_BIT;
     }
     swapchainInfo.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
@@ -667,15 +673,40 @@ bool VulkanRenderBackend::recreateSwapchain(const RenderSurface& surface) {
     swapchainInfo.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
     swapchainInfo.presentMode = presentMode;
     swapchainInfo.clipped = VK_TRUE;
-    if (vkCreateSwapchainKHR(device_, &swapchainInfo, nullptr, &swapchain_) != VK_SUCCESS) {
+    // 保留旧交换链至新链创建调用结束，使 WSI 能复用呈现资源；调用失败也会使旧链退役。
+    const VkSwapchainKHR oldSwapchain = swapchain_;
+    swapchain_ = VK_NULL_HANDLE;
+    destroySwapchain();
+    swapchainInfo.oldSwapchain = oldSwapchain;
+    const VkResult result = vkCreateSwapchainKHR(device_, &swapchainInfo, nullptr, &swapchain_);
+    if (oldSwapchain != VK_NULL_HANDLE) {
+        vkDestroySwapchainKHR(device_, oldSwapchain, nullptr);
+    }
+    if (result != VK_SUCCESS) {
+        swapchain_ = VK_NULL_HANDLE;
         return false;
     }
 
     swapchainFormat_ = surfaceFormat.format;
     swapchainExtent_ = extent;
-    vkGetSwapchainImagesKHR(device_, swapchain_, &imageCount, nullptr);
+    swapchainTransferSrcSupported_ = (swapchainInfo.imageUsage & VK_IMAGE_USAGE_TRANSFER_SRC_BIT) != 0;
+    swapchainTransferDstSupported_ = (swapchainInfo.imageUsage & VK_IMAGE_USAGE_TRANSFER_DST_BIT) != 0;
+    if (!createSwapchainResources()) {
+        destroySwapchain();
+        return false;
+    }
+    return true;
+}
+
+bool VulkanRenderBackend::createSwapchainResources() {
+    std::uint32_t imageCount = 0;
+    if (vkGetSwapchainImagesKHR(device_, swapchain_, &imageCount, nullptr) != VK_SUCCESS || imageCount == 0) {
+        return false;
+    }
     swapchainImages_.resize(imageCount);
-    vkGetSwapchainImagesKHR(device_, swapchain_, &imageCount, swapchainImages_.data());
+    if (vkGetSwapchainImagesKHR(device_, swapchain_, &imageCount, swapchainImages_.data()) != VK_SUCCESS) {
+        return false;
+    }
     swapchainImageLayouts_.assign(swapchainImages_.size(), VK_IMAGE_LAYOUT_UNDEFINED);
     swapchainImageCacheGenerations_.assign(swapchainImages_.size(), 0);
 
@@ -767,9 +798,18 @@ bool VulkanRenderBackend::recreateSwapchain(const RenderSurface& surface) {
     VkFenceCreateInfo fenceInfo{};
     fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
     fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
-    return vkCreateSemaphore(device_, &semaphoreInfo, nullptr, &imageAvailable_) == VK_SUCCESS &&
-           vkCreateSemaphore(device_, &semaphoreInfo, nullptr, &renderFinished_) == VK_SUCCESS &&
-           vkCreateFence(device_, &fenceInfo, nullptr, &inFlight_) == VK_SUCCESS;
+    if (vkCreateSemaphore(device_, &semaphoreInfo, nullptr, &imageAvailable_) != VK_SUCCESS ||
+        vkCreateFence(device_, &fenceInfo, nullptr, &inFlight_) != VK_SUCCESS) {
+        return false;
+    }
+    // 提交 fence 完成不代表 presentation 已消费信号量；只有重新 acquire 同一图像才可复用。
+    renderFinishedSemaphores_.resize(swapchainImages_.size(), VK_NULL_HANDLE);
+    for (auto& semaphore : renderFinishedSemaphores_) {
+        if (vkCreateSemaphore(device_, &semaphoreInfo, nullptr, &semaphore) != VK_SUCCESS) {
+            return false;
+        }
+    }
+    return true;
 }
 
 void VulkanRenderBackend::recordClearPass(const core::Color& color) {
@@ -936,10 +976,10 @@ void VulkanRenderBackend::destroySwapchain() {
         vkDestroyFence(device_, inFlight_, nullptr);
         inFlight_ = VK_NULL_HANDLE;
     }
-    if (renderFinished_ != VK_NULL_HANDLE) {
-        vkDestroySemaphore(device_, renderFinished_, nullptr);
-        renderFinished_ = VK_NULL_HANDLE;
+    for (VkSemaphore semaphore : renderFinishedSemaphores_) {
+        if (semaphore != VK_NULL_HANDLE) vkDestroySemaphore(device_, semaphore, nullptr);
     }
+    renderFinishedSemaphores_.clear();
     if (imageAvailable_ != VK_NULL_HANDLE) {
         vkDestroySemaphore(device_, imageAvailable_, nullptr);
         imageAvailable_ = VK_NULL_HANDLE;
@@ -1025,6 +1065,9 @@ void VulkanRenderBackend::destroyTextureResource(TextureResource& texture) {
     }
     if (texture.descriptorPool != VK_NULL_HANDLE && texture.descriptorSet != VK_NULL_HANDLE) {
         vkFreeDescriptorSets(device_, texture.descriptorPool, 1, &texture.descriptorSet);
+        if (texture.descriptorPool == imageDescriptorPool_ && imageDescriptorPoolUsed_ > 0) {
+            --imageDescriptorPoolUsed_;
+        }
         texture.descriptorSet = VK_NULL_HANDLE;
         texture.descriptorPool = VK_NULL_HANDLE;
     }
@@ -1032,7 +1075,7 @@ void VulkanRenderBackend::destroyTextureResource(TextureResource& texture) {
         vkDestroySampler(device_, texture.sampler, nullptr);
         texture.sampler = VK_NULL_HANDLE;
     }
-    if (texture.view != VK_NULL_HANDLE) {
+    if (texture.view != VK_NULL_HANDLE && !texture.externalImage) {
         vkDestroyImageView(device_, texture.view, nullptr);
         texture.view = VK_NULL_HANDLE;
     }

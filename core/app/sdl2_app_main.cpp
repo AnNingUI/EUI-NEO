@@ -566,6 +566,7 @@ bool updateManagedWindow(ManagedWindow& managed, float deltaSeconds, bool update
     const float logicalWidth = static_cast<float>(drawableWidth) / dpi;
     const float logicalHeight = static_cast<float>(drawableHeight) / dpi;
 
+    core::render::ScopedRenderBackend scopedRenderBackend(*managed.renderBackend);
     managed.content.update(managed.window, deltaSeconds, logicalWidth, logicalHeight, pointer, dpi, updateRequested);
     if (managed.content.paintRequested()) {
         managed.renderBackend->beginFrame({
@@ -602,6 +603,18 @@ int eui_app_run() {
     core::window::WindowCreateRequest windowRequest;
     windowRequest.width = app::initialWindowWidth();
     windowRequest.height = app::initialWindowHeight();
+    windowRequest.x = app::initialWindowX();
+    windowRequest.y = app::initialWindowY();
+    windowRequest.positionSet = app::initialWindowPositionSet();
+    windowRequest.minWidth = app::minimumWindowWidth();
+    windowRequest.minHeight = app::minimumWindowHeight();
+    windowRequest.maxWidth = app::maximumWindowWidth();
+    windowRequest.maxHeight = app::maximumWindowHeight();
+    windowRequest.resizable = app::windowResizable();
+    windowRequest.highDpi = app::windowHighDpi();
+    windowRequest.decorated = app::windowDecorated();
+    windowRequest.alwaysOnTop = app::windowAlwaysOnTop();
+    windowRequest.maximized = app::windowMaximized();
     windowRequest.title = app::windowTitle();
     windowRequest.renderApi = core::render::windowRenderApi();
     SDL_Window* window = static_cast<SDL_Window*>(core::window::createWindow(windowRequest));

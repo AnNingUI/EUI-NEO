@@ -2,6 +2,10 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
+#include <string>
+#include <string_view>
+#include <type_traits>
 
 namespace core {
 
@@ -27,6 +31,55 @@ struct Color {
     float g = 1.0f;
     float b = 1.0f;
     float a = 1.0f;
+
+    /** @brief 默认不透明白色，保留原有 RGBA 数值初始化语义。 */
+    constexpr Color() = default;
+    constexpr Color(float red, float green = 1.0f, float blue = 1.0f, float alpha = 1.0f)
+        : r(red), g(green), b(blue), a(alpha) {}
+
+    /** @brief 接受 #RGB、#RGBA、#RRGGBB、#RRGGBBAA；非法输入回退为透明黑。 */
+    Color(std::string_view hex) : Color(fromHex(hex)) {}
+    // 限定字符指针，避免 Color{0} 同时匹配 RGBA 数值和空指针。
+    template<typename Char, std::enable_if_t<std::is_same_v<Char, char>, int> = 0>
+    Color(const Char* hex) : Color(hex ? std::string_view(hex) : std::string_view{}) {}
+    Color(const std::string& hex) : Color(std::string_view(hex)) {}
+
+    /** @brief 数值形式固定解释为 0xRRGGBB，alpha 默认为 1。 */
+    static constexpr Color fromHex(std::uint32_t rgb) {
+        return {((rgb >> 16) & 255) / 255.0f, ((rgb >> 8) & 255) / 255.0f,
+                (rgb & 255) / 255.0f, 1.0f};
+    }
+
+    /** @brief 数值形式固定解释为 0xRRGGBBAA，包含透明度。 */
+    static constexpr Color fromHexRgba(std::uint32_t rgba) {
+        return {((rgba >> 24) & 255) / 255.0f, ((rgba >> 16) & 255) / 255.0f,
+                ((rgba >> 8) & 255) / 255.0f, (rgba & 255) / 255.0f};
+    }
+
+    /** @brief 严格解析 HEX；失败返回 false 且不修改 output。不分配内存、不抛异常。 */
+    static bool tryFromHex(std::string_view hex, Color& output) {
+        if (hex.empty() || hex.front() != '#') return false;
+        hex.remove_prefix(1);
+        const bool shortForm = hex.size() == 3 || hex.size() == 4;
+        if (!shortForm && hex.size() != 6 && hex.size() != 8) return false;
+        std::uint32_t value = 0;
+        for (char c : hex) {
+            const int digit = c >= '0' && c <= '9' ? c - '0' :
+                              c >= 'a' && c <= 'f' ? c - 'a' + 10 :
+                              c >= 'A' && c <= 'F' ? c - 'A' + 10 : -1;
+            if (digit < 0) return false;
+            value = shortForm ? (value << 8) | (digit * 17) : (value << 4) | digit;
+        }
+        output = hex.size() == 3 || hex.size() == 6 ? fromHex(value) : fromHexRgba(value);
+        return true;
+    }
+
+    /** @brief 解析 HEX 字符串；失败时返回透明黑，需要错误反馈时使用 tryFromHex。 */
+    static Color fromHex(std::string_view hex) {
+        Color result{0.0f, 0.0f, 0.0f, 0.0f};
+        tryFromHex(hex, result);
+        return result;
+    }
 };
 
 struct Rect {

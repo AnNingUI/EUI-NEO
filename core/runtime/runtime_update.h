@@ -912,7 +912,12 @@ inline void Runtime::updateText(
         instance.verticalAlign != element.verticalAlign ||
         instance.lineHeight != element.lineHeight;
     if (contentChanged) {
-        instance.text = element.text;
+        if (instance.text.capacity() / 4u > element.text.size()) {
+            std::string compactText = element.text;
+            instance.text.swap(compactText);
+        } else {
+            instance.text = element.text;
+        }
         instance.contentDirtyKey = element.dirtyKey;
         instance.fontFamily = element.fontFamily;
         instance.fontSize = element.fontSize;
@@ -988,16 +993,22 @@ inline void Runtime::updateImage(
 
     const bool sourceChanged = instance.source != element.imageSource ||
                                instance.stream != element.imageStream ||
+                               instance.gpuImage != element.gpuImage ||
+                               instance.gpuImageRevision != element.gpuImageRevision ||
                                instance.svgSource != element.svgSource ||
                                instance.flipVertically != element.imageFlipVertically ||
                                instance.fit != element.imageFit;
     if (sourceChanged) {
         instance.source = element.imageSource;
         instance.stream = element.imageStream;
+        instance.gpuImage = element.gpuImage;
+        instance.gpuImageRevision = element.gpuImageRevision;
         instance.svgSource = element.svgSource;
         instance.flipVertically = element.imageFlipVertically;
         instance.fit = element.imageFit;
-        if (instance.stream) {
+        if (instance.gpuImage) {
+            instance.primitive->setGpuImage(instance.gpuImage, instance.gpuImageRevision);
+        } else if (instance.stream) {
             instance.primitive->setStream(instance.stream);
         } else if (element.kind == ElementKind::Svg) {
             instance.primitive->setSvgSource(element.id, instance.svgSource);

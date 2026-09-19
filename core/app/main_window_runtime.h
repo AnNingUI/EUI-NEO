@@ -92,6 +92,7 @@ public:
         }
 
         renderBackend.makeCurrent();
+        core::render::ScopedRenderBackend scopedRenderBackend(renderBackend);
         if (app::update(window,
                         deltaSeconds,
                         metrics.framebufferWidth,
@@ -117,7 +118,6 @@ public:
             metrics.framebufferHeight,
             metrics.dpiScale
         });
-        core::render::ScopedRenderBackend scopedRenderBackend(renderBackend);
         app::render(metrics.framebufferWidth, metrics.framebufferHeight, metrics.dpiScale);
         renderBackend.present();
         core::render::publishRenderFrameStats();

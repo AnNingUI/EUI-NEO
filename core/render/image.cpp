@@ -100,6 +100,10 @@ struct ImagePrimitive::Impl {
     bool initialize() { return true; }
     void destroy();
     void setSource(const std::string& source) {
+        if (gpuImage_) {
+            releaseTexture();
+            gpuImage_.reset();
+        }
         if (stream_) {
             releaseTexture();
             stream_.reset();
@@ -114,11 +118,16 @@ struct ImagePrimitive::Impl {
         textureUploadDeferred_ = false;
     }
     void setStream(const std::shared_ptr<render::ImageStream>& stream) {
-        if (stream_ == stream) {
+        if (stream_ == stream && !gpuImage_) {
             return;
         }
-        releaseTexture();
+        resetImageInput();
         stream_ = stream;
+    }
+    void resetImageInput() {
+        releaseTexture();
+        gpuImage_.reset();
+        stream_.reset();
         source_.clear();
         svgKey_.clear();
         svgSource_.clear();
@@ -128,6 +137,7 @@ struct ImagePrimitive::Impl {
         loadedStaticPath_.clear();
         staticImage_.reset();
         gifFrames_.reset();
+        gifFrameCount_ = 0;
         dynamicFrame_.reset();
         dynamicRgbaPixels_.clear();
         dynamicDirty_ = false;
@@ -137,6 +147,10 @@ struct ImagePrimitive::Impl {
         pendingLoad_ = false;
     }
     void setSvgSource(const std::string& key, const std::string& svg) {
+        if (gpuImage_) {
+            releaseTexture();
+            gpuImage_.reset();
+        }
         if (stream_) {
             releaseTexture();
             stream_.reset();
@@ -149,6 +163,18 @@ struct ImagePrimitive::Impl {
         svgKey_ = key;
         svgSource_ = svg;
         textureUploadDeferred_ = false;
+    }
+    void setGpuImage(const std::shared_ptr<const render::GpuImage>& image, std::uint64_t revision) {
+        const bool sourceChanged = gpuImage_ != image || stream_ || !source_.empty() || !svgSource_.empty();
+        if (!sourceChanged && gpuRevision_ == revision) return;
+        if (sourceChanged) {
+            resetImageInput();
+            gpuImage_ = image;
+            textureWidth_ = image ? image->descriptor().width : 0;
+            textureHeight_ = image ? image->descriptor().height : 0;
+        }
+        gpuRevision_ = revision;
+        ++contentVersion_;
     }
     void setFlipVertically(bool value) { flipVertically_ = value; }
     void setBounds(float x, float y, float width, float height) { bounds_ = {x, y, width, height}; }
@@ -169,6 +195,7 @@ struct ImagePrimitive::Impl {
     bool hasPendingLoad() const { return pendingLoad_; }
     bool isAnimating() const { return gifFrameCount_ > 1 || stream_ != nullptr; }
     bool isRetainedLayerReady() const {
+        if (gpuImage_) return texture_ != nullptr;
         return stream_ == nullptr &&
                gifFrameCount_ <= 1 &&
                !pendingLoad_ &&
@@ -206,6 +233,8 @@ struct ImagePrimitive::Impl {
 
     std::string source_;
     std::shared_ptr<render::ImageStream> stream_;
+    std::shared_ptr<const render::GpuImage> gpuImage_;
+    std::uint64_t gpuRevision_ = 0;
     std::optional<render::ImageFrame> dynamicFrame_;
     std::vector<std::uint8_t> dynamicRgbaPixels_;
     bool dynamicDirty_ = false;
@@ -256,6 +285,7 @@ struct ImagePrimitive::Impl {
 void ImagePrimitive::Impl::destroy() {
     releaseTexture();
     stream_.reset();
+    gpuImage_.reset();
     dynamicFrame_.reset();
     dynamicRgbaPixels_.clear();
     dynamicDirty_ = false;
@@ -292,6 +322,7 @@ bool ImagePrimitive::Impl::ensureStaticPixels() {
 }
 
 bool ImagePrimitive::Impl::updateTexture() {
+    if (gpuImage_) return false;
     if (stream_) {
         const std::optional<render::ImageFrame> frame = stream_->consumeLatest();
         if (!frame) {
@@ -467,6 +498,7 @@ void ImagePrimitive::Impl::render(int windowWidth, int windowHeight) {
     }
     if (texture_ != nullptr && textureBackend_ != backend) {
         releaseTexture();
+        backend->makeCurrent();
     }
 
     const unsigned char* pixels = nullptr;
@@ -481,7 +513,12 @@ void ImagePrimitive::Impl::render(int windowWidth, int windowHeight) {
     }
 
     const bool wantsCachedTexture = staticContentLoaded_ && !desiredTextureCacheKey_.empty();
-    if (stream_) {
+    if (gpuImage_) {
+        if (!texture_) {
+            texture_ = backend->createGpuTexture(gpuImage_);
+            textureBackend_ = texture_ ? backend : nullptr;
+        }
+    } else if (stream_) {
         if (!dynamicFrame_ || textureWidth_ <= 0 || textureHeight_ <= 0) {
             return;
         }
@@ -767,6 +804,10 @@ void ImagePrimitive::Impl::rebuildVertices(float* vertices) const {
             }
         }
     }
+    if (gpuImage_ && flipVertically_) {
+        v0 = 1.0f - v0;
+        v1 = 1.0f - v1;
+    }
     const Vec2 uv[4] = {{u0, v0}, {u1, v0}, {u1, v1}, {u0, v1}};
     const int order[6] = {0, 1, 2, 0, 2, 3};
     for (int i = 0; i < 6; ++i) {
@@ -793,6 +834,9 @@ bool ImagePrimitive::initialize() { return impl_->initialize(); }
 void ImagePrimitive::destroy() { impl_->destroy(); }
 void ImagePrimitive::setSource(const std::string& source) { impl_->setSource(source); }
 void ImagePrimitive::setStream(const std::shared_ptr<render::ImageStream>& stream) { impl_->setStream(stream); }
+void ImagePrimitive::setGpuImage(const std::shared_ptr<const render::GpuImage>& image, std::uint64_t revision) {
+    impl_->setGpuImage(image, revision);
+}
 void ImagePrimitive::setSvgSource(const std::string& key, const std::string& svg) { impl_->setSvgSource(key, svg); }
 void ImagePrimitive::setFlipVertically(bool value) { impl_->setFlipVertically(value); }
 void ImagePrimitive::setBounds(float x, float y, float width, float height) { impl_->setBounds(x, y, width, height); }

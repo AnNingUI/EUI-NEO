@@ -7,6 +7,7 @@
 #include "core/input/input_types.h"
 #include "core/render/render_types.h"
 #include "core/render/image_stream.h"
+#include "core/render/gpu_image.h"
 #include "core/render/text.h"
 #include "core/render/text_types.h"
 
@@ -139,6 +140,8 @@ struct Element {
 
     std::string imageSource;
     std::shared_ptr<core::render::ImageStream> imageStream;
+    std::shared_ptr<const core::render::GpuImage> gpuImage;
+    std::uint64_t gpuImageRevision = 0;
     std::string svgSource;
     bool imageFlipVertically = false;
     ImageFit imageFit = ImageFit::Cover;
@@ -1209,21 +1212,40 @@ public:
     ImageBuilder(Ui& ui, Element* element) : BuilderBase<ImageBuilder>(ui, element) {}
 
     ImageBuilder& source(const std::string& value) {
-        element_->imageSource = value;
+        // 继承的链式 setter 返回 ImageBuilder&，源语义必须由元素类型决定。
+        if (element_->kind == ElementKind::Svg) {
+            element_->svgSource = value;
+            element_->imageSource.clear();
+        } else {
+            element_->imageSource = value;
+            element_->svgSource.clear();
+        }
         element_->imageStream.reset();
+        element_->gpuImage.reset();
         return *this;
     }
 
     ImageBuilder& stream(const std::shared_ptr<core::render::ImageStream>& value) {
+        element_->gpuImage.reset();
         element_->imageStream = value;
         element_->imageSource.clear();
         element_->svgSource.clear();
         return *this;
     }
 
-    ImageBuilder& bingDaily(int idx = 0, const std::string& mkt = "zh-CN") {
-        element_->imageSource = "bing://daily?idx=" + std::to_string(std::max(0, idx)) + "&mkt=" + mkt;
+    /** @brief 绑定外部 GPU 图像；原纹理内容变化后递增 revision 并请求 UI 更新。 */
+    ImageBuilder& texture(const std::shared_ptr<const core::render::GpuImage>& value,
+                          std::uint64_t revision = 0) {
+        element_->gpuImage = value;
+        element_->gpuImageRevision = revision;
+        element_->imageStream.reset();
+        element_->imageSource.clear();
+        element_->svgSource.clear();
         return *this;
+    }
+
+    ImageBuilder& bingDaily(int idx = 0, const std::string& mkt = "zh-CN") {
+        return source("bing://daily?idx=" + std::to_string(std::max(0, idx)) + "&mkt=" + mkt);
     }
 
     ImageBuilder& tint(const Color& value) {
@@ -1347,8 +1369,7 @@ public:
     SvgBuilder(Ui& ui, Element* element) : ImageBuilder(ui, element) {}
 
     SvgBuilder& source(std::string value) {
-        element_->svgSource = std::move(value);
-        element_->imageSource.clear();
+        ImageBuilder::source(value);
         return *this;
     }
 
@@ -1710,7 +1731,7 @@ private:
                !element.dirtyKey.empty() ||
                element.kind == ElementKind::Shadertoy ||
                (element.kind == ElementKind::Image &&
-                (!element.imageSource.empty() || element.imageStream != nullptr)) ||
+                (!element.imageSource.empty() || element.imageStream != nullptr || element.gpuImage != nullptr)) ||
                element.kind == ElementKind::Svg;
     }
 
