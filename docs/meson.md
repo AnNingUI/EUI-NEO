@@ -81,34 +81,71 @@ tree, exactly like the CMake build.
 
 ## Using EUI-NEO from another Meson project
 
-Once the wrap is available in WrapDB:
-
-```sh
-meson wrap install eui-neo
-```
-
-```meson
-eui_neo_dep = dependency('eui-neo')
-executable('my_app', ['app.cpp', 'subprojects/eui-neo/core/app/glfw_app_main.cpp'],
-  dependencies: eui_neo_dep)
-```
-
-A checked-out copy also works without WrapDB by placing it under
-`subprojects/eui-neo/` (the `meson.override_dependency()` call in the project
-makes `dependency('eui-neo')` resolve to it):
+A complete consumer project looks like this:
 
 ```
 my_project/
-├── meson.build            # dependency('eui-neo')
+├── meson.build
+├── src/main.cpp
 └── subprojects/
-    └── eui-neo/           # this repository
-        └── subprojects/   # dependency wraps used by EUI-NEO itself
+    └── eui-neo/            # this repository (or a WrapDB wrap)
+        └── subprojects/    # the dependency wraps EUI-NEO itself uses
 ```
 
-As a subproject EUI-NEO builds only the library (and modules), never the
-examples, apps, or tests, and registers no install rules. Consumers can
-override behaviour with subproject options, for example
-`-Deui-neo:enable_tray=false`.
+Once the wrap is available in WrapDB, `meson wrap install eui-neo` fetches it
+into `subprojects/`. Until then, place a checkout there directly;
+`meson.override_dependency()` makes `dependency('eui-neo')` resolve to it either
+way.
+
+`meson.build`:
+
+```meson
+project('my_app', 'c', 'cpp', version: '0.1.0',
+  default_options: ['cpp_std=c++17', 'default_library=static'])
+
+eui = subproject('eui-neo')
+eui_dep = dependency('eui-neo')
+
+executable('my_app', 'src/main.cpp',
+  # The second dependency carries the application entry point that matches the
+  # window backend EUI-NEO was configured with.
+  dependencies: [eui_dep, eui.get_variable('eui_neo_app_dep')])
+
+# Copy EUI-NEO's runtime assets (fonts, icons, shaders) next to the program.
+meson.add_postconf_script(
+  eui.get_variable('eui_neo_copy_assets_script'),
+  meson.project_build_root() / 'assets',
+  eui.get_variable('eui_neo_assets_dir'))
+```
+
+`src/main.cpp` only defines `app::dslAppConfig()` and `app::compose(...)`; see
+the minimal example in the top-level README. EUI-NEO owns the window, the event
+loop, the render backend, and resource resolution.
+
+```sh
+meson setup build
+meson compile -C build
+./build/my_app
+```
+
+### Exported subproject variables
+
+| Variable | Type | Purpose |
+| --- | --- | --- |
+| `eui_neo_app_dep` | dependency | Application entry point for the configured window backend (carries the source plus `eui_neo_dep`). Meson forbids parents from taking subproject files by path, so it travels as a dependency. |
+| `eui_neo_assets_dir` | string | Absolute path to the bundled runtime assets. |
+| `eui_neo_copy_assets_script` | string | `meson/copy_assets.py`, which copies asset directories into a destination. |
+
+### Notes
+
+- The **parent** project must request C++17 itself (`default_options:
+  ['cpp_std=c++17']`); dependency objects do not propagate the language
+  standard.
+- As a subproject EUI-NEO builds only the library and modules, never the
+  examples, apps, or tests, and registers no install rules.
+- Subproject options are set from the parent, for example
+  `-Deui-neo:window_backend=sdl2`, `-Deui-neo:render_backend=vulkan`, or
+  `-Deui-neo:enable_tray=false`.
 
 ## Installing
 

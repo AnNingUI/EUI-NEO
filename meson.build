@@ -402,6 +402,18 @@ else
   app_main_source = 'core/app/sdl2_app_main.cpp'
 endif
 
+# Exported for subproject consumers, which need the application entry point
+# matching the selected window backend plus the bundled runtime assets.  The
+# entry point travels as a dependency because Meson forbids a parent project
+# from grabbing a subproject's files by path; the asset paths are plain strings
+# that a configure-time script copies.  See docs/meson.md.
+eui_neo_app_dep = declare_dependency(
+  sources: files(app_main_source),
+  dependencies: eui_neo_dep,
+)
+eui_neo_assets_dir = meson.project_source_root() / 'assets'
+eui_neo_copy_assets_script = meson.project_source_root() / 'meson' / 'copy_assets.py'
+
 if build_apps or build_user_apps
   win_app_link_args = []
   if is_windows and cc.get_id() == 'msvc'
