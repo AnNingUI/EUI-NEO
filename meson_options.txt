@@ -1,0 +1,62 @@
+option(
+  'render_backend',
+  type: 'combo',
+  choices: ['auto', 'opengl', 'vulkan'],
+  value: 'auto',
+  description: 'Render backend: auto-detect, OpenGL, or Vulkan',
+)
+option(
+  'window_backend',
+  type: 'combo',
+  choices: ['glfw', 'sdl2'],
+  value: 'glfw',
+  description: 'Window backend: GLFW or SDL2',
+)
+option(
+  'build_apps',
+  type: 'boolean',
+  value: true,
+  description: 'Build the bundled examples from examples/ (top-level builds only)',
+)
+option(
+  'build_user_apps',
+  type: 'boolean',
+  value: true,
+  description: 'Build the longer applications from apps/ (top-level builds only)',
+)
+option(
+  'build_tests',
+  type: 'boolean',
+  value: false,
+  description: 'Build and register the headless unit test suite',
+)
+option(
+  'ffmpeg_video_example',
+  type: 'boolean',
+  value: false,
+  description: 'Build the optional FFmpeg video playback example (needs FFmpeg development files)',
+)
+option(
+  'enable_modules',
+  type: 'boolean',
+  value: true,
+  description: 'Build the optional EUI-NEO feature modules',
+)
+option(
+  'enable_markdown',
+  type: 'boolean',
+  value: true,
+  description: 'Enable MD4C Markdown rendering support',
+)
+option(
+  'enable_tray',
+  type: 'boolean',
+  value: true,
+  description: 'Enable the system tray backend (Linux needs glib/gio or GTK3 + libappindicator)',
+)
+option(
+  'low_latency_present',
+  type: 'boolean',
+  value: false,
+  description: 'Prefer low-latency Vulkan presentation when available',
+)

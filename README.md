@@ -121,6 +121,26 @@ eui_neo_configure_app(my_app)
 
 See the [Integration Guide](docs/集成指南.md) for installation, `FetchContent`, and SDL2/Vulkan selection. See [Development And Release](docs/开发与发布.md) for building this repository and dependency requirements.
 
+### Meson
+
+A Meson build is provided as an alternative to CMake:
+
+```sh
+meson setup build
+meson compile -C build
+```
+
+Backends and features are selected with options such as
+`-Drender_backend=vulkan`, `-Dwindow_backend=sdl2`, or
+`-Dbuild_tests=true`. Dependencies prefer system packages and fall back to the
+pinned wraps under `subprojects/`, so a clean checkout configures without any
+pre-installed development packages. As a subproject, `dependency('eui-neo')`
+resolves through `meson wrap install eui-neo`.
+
+See the [Meson Guide](docs/meson.md) for the full option list, wrap handling,
+platform notes, and the differences from the CMake build. The WrapDB
+submission files live in [`packaging/wrapdb`](packaging/wrapdb).
+
 ## Optional Modules
 
 Optional feature modules live under `modules/` and are documented in the [Modules Guide](docs/模块.md).
@@ -157,6 +177,7 @@ tests/        Probe sources, fixture apps, and local benchmark notes
 - [Network](docs/网络.md)
 - [Platform Capabilities](docs/平台能力.md)
 - [Integration Guide](docs/集成指南.md)
+- [Meson Build](docs/meson.md)
 - [Shadertoy Primitive](docs/Shadertoy.md)
 - [Development And Release](docs/开发与发布.md)
 

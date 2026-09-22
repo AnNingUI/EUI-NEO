@@ -31,7 +31,9 @@ int main() {
     assert(latest && latest->sequence == 4);
 
     assert(!stream->submit({pixels, 4, 2, 15, core::render::ImagePixelFormat::RGBA8, 5}));
-    assert(!stream->submit({pixels, 4, 2, 16, core::render::ImagePixelFormat::BGRA8, 6}));
+    // BGRA8 is a supported frame format (see ImageFrame::valid()), so the
+    // mailbox accepts it; only the invalid stride above is rejected.
+    assert(stream->submit({pixels, 4, 2, 16, core::render::ImagePixelFormat::BGRA8, 6}));
 
     std::vector<std::uint8_t> converted;
     const auto bgra = std::make_shared<const std::vector<std::uint8_t>>(

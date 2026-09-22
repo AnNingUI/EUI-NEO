@@ -16,3 +16,14 @@
 /Android/app/build/
 /Android/build/
 /Android/local.properties
+
+# Meson: keep subprojects/*.wrap, ignore downloaded sources and package cache
+/build-meson*/
+/subprojects/*
+!/subprojects/*.wrap
+__pycache__/
+*.pyc
+
+# Local tooling output
+/.pi/
+/logs/
